@@ -1,0 +1,189 @@
+[
+  {
+    "name": "Cafe Younes",
+    "slug": "cafe-younes",
+    "description": "Lebanon's oldest and most beloved coffee roastery, serving exceptional coffee since 1935. Known for their signature Lebanese coffee blends and cozy atmosphere.",
+    "website_url": "https://cafeyounes.com",
+    "category_slug": "coffee-cafes",
+    "country_code": "LB",
+    "city": "Beirut",
+    "address": "Hamra Street, Beirut, Lebanon",
+    "latitude": 33.8939,
+    "longitude": 35.4744,
+    "contact_email": "info@cafeyounes.com",
+    "contact_phone": "+9611351351",
+    "is_active": true,
+    "is_verified": true,
+    "rating": 4.8,
+    "review_count": 1240,
+    "gift_cards": [
+      {
+        "name": "50,000 LBP Store Credit",
+        "description": "Use this credit for any coffee, pastry, or retail purchase at Cafe Younes.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 50000,
+        "currency_code": "LBP",
+        "valid_until_days": 365
+      },
+      {
+        "name": "100,000 LBP Store Credit",
+        "description": "Perfect for sharing the love of Lebanese coffee. Use for any purchase at Cafe Younes.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 100000,
+        "currency_code": "LBP",
+        "valid_until_days": 365
+      },
+      {
+        "name": "Signature Coffee Box Gift",
+        "description": "A curated selection of Cafe Younes' finest coffee blends - the perfect gift for coffee lovers.",
+        "type": "gift_item",
+        "is_store_credit": false,
+        "item_name": "Signature Coffee Box (500g assorted)",
+        "item_sku": "CY-BOX-500",
+        "item_price": 75000,
+        "currency_code": "LBP",
+        "valid_until_days": 90
+      }
+    ]
+  },
+  {
+    "name": "Em Sherif",
+    "slug": "em-sherif",
+    "description": "An iconic Lebanese fine dining restaurant celebrating authentic Lebanese cuisine with a modern twist. Award-winning dishes and an unforgettable dining experience.",
+    "website_url": "https://emsherif.com",
+    "category_slug": "restaurants",
+    "country_code": "LB",
+    "city": "Beirut",
+    "address": "Maarad Street, Downtown Beirut, Lebanon",
+    "latitude": 33.8988,
+    "longitude": 35.5024,
+    "contact_email": "reservations@emsherif.com",
+    "contact_phone": "+9611999123",
+    "is_active": true,
+    "is_verified": true,
+    "rating": 4.9,
+    "review_count": 876,
+    "gift_cards": [
+      {
+        "name": "$50 Dining Credit",
+        "description": "Treat someone special to an unforgettable Lebanese fine dining experience at Em Sherif.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 50,
+        "currency_code": "USD",
+        "valid_until_days": 180
+      },
+      {
+        "name": "$100 Dining Credit",
+        "description": "The ultimate gift for food lovers - enjoy the finest Lebanese cuisine at Em Sherif.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 100,
+        "currency_code": "USD",
+        "valid_until_days": 180
+      },
+      {
+        "name": "Mezze Tasting Experience",
+        "description": "A private mezze tasting experience for two - savour 20+ authentic Lebanese dishes.",
+        "type": "gift_item",
+        "is_store_credit": false,
+        "item_name": "Mezze Tasting for 2",
+        "item_sku": "ES-MEZZE-2",
+        "item_price": 120,
+        "currency_code": "USD",
+        "valid_until_days": 90
+      }
+    ]
+  },
+  {
+    "name": "Aïshti",
+    "slug": "aishti",
+    "description": "Lebanon's premier luxury lifestyle destination, housing international designer brands and offering a world-class shopping experience since 1991.",
+    "website_url": "https://aishti.com",
+    "category_slug": "retail-shopping",
+    "country_code": "LB",
+    "city": "Beirut",
+    "address": "Antelias Highway, Beirut, Lebanon",
+    "latitude": 33.9017,
+    "longitude": 35.5621,
+    "contact_email": "info@aishti.com",
+    "contact_phone": "+9614409000",
+    "is_active": true,
+    "is_verified": true,
+    "rating": 4.6,
+    "review_count": 543,
+    "gift_cards": [
+      {
+        "name": "$100 Shopping Credit",
+        "description": "Shop the latest designer collections at Aïshti with this store credit gift card.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 100,
+        "currency_code": "USD",
+        "valid_until_days": 365
+      },
+      {
+        "name": "$250 Shopping Credit",
+        "description": "Indulge in luxury fashion and lifestyle products at Lebanon's finest department store.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 250,
+        "currency_code": "USD",
+        "valid_until_days": 365
+      }
+    ]
+  },
+  {
+    "name": "Bliss House Spa",
+    "slug": "bliss-house-spa",
+    "description": "A sanctuary of relaxation in the heart of Beirut. Offering world-class spa treatments, massages, and beauty services in a serene environment.",
+    "website_url": null,
+    "category_slug": "spas-wellness",
+    "country_code": "LB",
+    "city": "Beirut",
+    "address": "Bliss Street, Hamra, Beirut, Lebanon",
+    "latitude": 33.8911,
+    "longitude": 35.4814,
+    "contact_email": "bookings@blisshousespa.com",
+    "contact_phone": "+9611347777",
+    "is_active": true,
+    "is_verified": true,
+    "rating": 4.7,
+    "review_count": 312,
+    "gift_cards": [
+      {
+        "name": "Relaxation Package",
+        "description": "A 90-minute relaxation package including a full body massage and facial treatment.",
+        "type": "gift_item",
+        "is_store_credit": false,
+        "item_name": "90-min Relaxation Package",
+        "item_sku": "BHS-RELAX-90",
+        "item_price": 80,
+        "currency_code": "USD",
+        "valid_until_days": 120
+      },
+      {
+        "name": "$50 Spa Credit",
+        "description": "Let your loved one choose their perfect treatment from our full spa menu.",
+        "type": "store_credit",
+        "is_store_credit": true,
+        "credit_amount": 50,
+        "currency_code": "USD",
+        "valid_until_days": 180
+      },
+      {
+        "name": "Couples Retreat",
+        "description": "An exclusive couples spa experience including side-by-side massages, jacuzzi access, and champagne.",
+        "type": "gift_item",
+        "is_store_credit": false,
+        "item_name": "Couples Retreat Package (2 hrs)",
+        "item_sku": "BHS-COUPLES-120",
+        "item_price": 180,
+        "currency_code": "USD",
+        "valid_until_days": 90
+      }
+    ]
+  }
+]

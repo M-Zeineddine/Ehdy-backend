@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Coffee & Cafes",
+    "slug": "coffee-cafes",
+    "description": "Coffee shops, cafes, and specialty drink establishments",
+    "display_order": 1
+  },
+  {
+    "name": "Restaurants",
+    "slug": "restaurants",
+    "description": "Fine dining, casual dining, and food experiences",
+    "display_order": 2
+  },
+  {
+    "name": "Retail & Shopping",
+    "slug": "retail-shopping",
+    "description": "Fashion, accessories, and lifestyle retail stores",
+    "display_order": 3
+  },
+  {
+    "name": "Spas & Wellness",
+    "slug": "spas-wellness",
+    "description": "Spas, beauty salons, and wellness centers",
+    "display_order": 4
+  },
+  {
+    "name": "Gyms & Fitness",
+    "slug": "gyms-fitness",
+    "description": "Gyms, fitness studios, and sports centers",
+    "display_order": 5
+  },
+  {
+    "name": "Entertainment",
+    "slug": "entertainment",
+    "description": "Cinemas, escape rooms, bowling, and leisure activities",
+    "display_order": 6
+  }
+]
