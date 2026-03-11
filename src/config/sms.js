@@ -1,12 +1,6 @@
 const twilio = require('twilio');
 require('dotenv').config();
 
-if (
-  (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) &&
-  process.env.NODE_ENV === 'production'
-) {
-  throw new Error('Twilio credentials are required in production');
-}
 
 let twilioClient = null;
 
