@@ -1,36 +1,24 @@
 'use strict';
 
-const { sgMail, emailConfig } = require('../config/email');
+const { resend, emailConfig } = require('../config/email');
 const logger = require('../utils/logger');
 
-const FROM = {
-  email: emailConfig.fromEmail,
-  name: emailConfig.fromName,
-};
+const FROM = `${emailConfig.fromName} <${emailConfig.fromEmail}>`;
 
 /**
- * Send a raw email via SendGrid.
+ * Send a raw email via Resend.
  */
-async function sendEmail({ to, subject, html, text }) {
-  if (!process.env.SENDGRID_API_KEY) {
-    logger.warn('SendGrid not configured, skipping email', { to, subject });
+async function sendEmail({ to, subject, html }) {
+  if (!resend) {
+    logger.warn('Resend not configured, skipping email', { to, subject });
     return;
   }
 
   try {
-    await sgMail.send({
-      to,
-      from: FROM,
-      subject,
-      html,
-      text: text || html.replace(/<[^>]+>/g, ''),
-    });
+    await resend.emails.send({ from: FROM, to, subject, html });
     logger.info('Email sent', { to, subject });
   } catch (err) {
     logger.error('Failed to send email', { to, subject, error: err.message });
-    // In development, swallow the error so the flow continues
-    if (process.env.NODE_ENV !== 'production') return;
-    throw err;
   }
 }
 
