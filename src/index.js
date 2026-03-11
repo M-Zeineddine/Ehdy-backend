@@ -113,6 +113,18 @@ app.get('/health', async (req, res) => {
   });
 });
 
+// ─── Email Test (remove before production launch) ─────────────────────────────
+app.get('/test-email/:to', async (req, res) => {
+  const { to } = req.params;
+  try {
+    const { sendEmail } = require('./services/emailService');
+    await sendEmail({ to, subject: 'Kado email test', html: '<h1>It works!</h1><p>Email delivery is configured correctly.</p>' });
+    res.json({ ok: true, message: `Test email sent to ${to}` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/v1/auth', authRoutes);
 app.use('/v1/users', userRoutes);
