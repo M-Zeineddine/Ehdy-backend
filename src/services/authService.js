@@ -70,9 +70,7 @@ async function sendVerificationEmail(email) {
   const key = `email_verify:${email.toLowerCase()}`;
   await redis.set(key, code, { EX: EMAIL_VERIFY_TTL });
 
-  if (process.env.NODE_ENV !== 'production') {
-    logger.info(`[DEV] Email verification code for ${email}: ${code}`);
-  }
+  logger.info(`[VERIFY] Email verification code for ${email}: ${code}`);
 
   await emailService.sendVerificationEmail(email, code);
   return true;
