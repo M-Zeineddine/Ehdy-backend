@@ -107,7 +107,7 @@ async function verifyEmail({ email, code }) {
 /**
  * Sign in with email and password.
  */
-async function signin({ email, password }) {
+async function signin({ email, password, skipPasswordCheck = false }) {
   const result = await query(
     `SELECT id, email, password_hash, first_name, last_name, is_email_verified, auth_provider, deleted_at
      FROM users WHERE email = $1`,
@@ -124,17 +124,18 @@ async function signin({ email, password }) {
     throw new AppError('This account has been deactivated', 403, 'ACCOUNT_DELETED');
   }
 
-  if (!user.password_hash) {
-    throw new AppError(
-      'This account uses social login. Please sign in with your social provider.',
-      400,
-      'SOCIAL_LOGIN_REQUIRED'
-    );
-  }
-
-  const passwordMatch = await bcrypt.compare(password, user.password_hash);
-  if (!passwordMatch) {
-    throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
+  if (!skipPasswordCheck) {
+    if (!user.password_hash) {
+      throw new AppError(
+        'This account uses social login. Please sign in with your social provider.',
+        400,
+        'SOCIAL_LOGIN_REQUIRED'
+      );
+    }
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatch) {
+      throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
+    }
   }
 
   // Update last login

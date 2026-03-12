@@ -18,7 +18,9 @@ const verifyEmail = async (req, res, next) => {
   try {
     const { email, code } = req.body;
     await authService.verifyEmail({ email, code });
-    return successResponse(res, null, 'Email verified successfully.');
+    // Sign the user in automatically after verification
+    const result = await authService.signin({ email, password: null, skipPasswordCheck: true });
+    return successResponse(res, result, 'Email verified successfully.');
   } catch (err) {
     return next(err);
   }
