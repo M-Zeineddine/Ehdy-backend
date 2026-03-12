@@ -12,4 +12,17 @@ const getGiftCard = async (req, res, next) => {
   }
 };
 
-module.exports = { getGiftCard };
+const listGiftCards = async (req, res, next) => {
+  try {
+    const { limit, merchant_id } = req.query;
+    const giftCards = await giftCardService.listGiftCards({
+      limit: parseInt(limit) || 10,
+      merchant_id,
+    });
+    return successResponse(res, { gift_cards: giftCards });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = { getGiftCard, listGiftCards };

@@ -32,6 +32,7 @@ const { optionalAuthenticate } = require('../middleware/auth');
  *       404:
  *         description: Gift card not found
  */
+router.get('/', optionalAuthenticate, giftCardController.listGiftCards);
 router.get('/:id', optionalAuthenticate, giftCardController.getGiftCard);
 
 module.exports = router;

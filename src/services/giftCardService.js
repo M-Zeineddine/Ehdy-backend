@@ -65,9 +65,40 @@ function calculateExpirationDate(giftCard, purchasedAt = new Date()) {
   return expDate.toISOString().split('T')[0]; // YYYY-MM-DD
 }
 
+/**
+ * List active gift cards with merchant info. Used for the "Popular Gifts" home feed.
+ */
+async function listGiftCards({ limit = 10, merchant_id } = {}) {
+  const conditions = ['gc.is_active = TRUE', 'm.deleted_at IS NULL', 'm.is_active = TRUE'];
+  const params = [];
+  let idx = 1;
+
+  if (merchant_id) {
+    conditions.push(`gc.merchant_id = $${idx++}`);
+    params.push(merchant_id);
+  }
+
+  params.push(limit);
+
+  const result = await query(
+    `SELECT gc.id, gc.merchant_id, gc.name, gc.description, gc.type,
+            gc.is_store_credit, gc.credit_amount, gc.currency_code, gc.image_url,
+            m.name as merchant_name, m.slug as merchant_slug, m.logo_url as merchant_logo_url
+     FROM gift_cards gc
+     JOIN merchants m ON m.id = gc.merchant_id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY m.rating DESC, gc.credit_amount ASC NULLS LAST
+     LIMIT $${idx}`,
+    params
+  );
+
+  return result.rows;
+}
+
 module.exports = {
   getGiftCardById,
   getGiftCardsByIds,
+  listGiftCards,
   getEffectivePrice,
   calculateExpirationDate,
 };
