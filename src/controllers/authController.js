@@ -77,9 +77,21 @@ const socialLogin = async (req, res, next) => {
   }
 };
 
+const resendVerification = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) return next(new (require('../middleware/errorHandler').AppError)('Email is required', 400));
+    await authService.sendVerificationEmail(email);
+    return successResponse(res, null, 'Verification code sent.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   signup,
   verifyEmail,
+  resendVerification,
   signin,
   refreshToken,
   forgotPassword,

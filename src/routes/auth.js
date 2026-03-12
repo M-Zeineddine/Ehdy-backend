@@ -36,6 +36,7 @@ const {
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.post('/signup', authLimiter, signupValidation, validate, authController.signup);
+router.post('/resend-verification', authLimiter, authController.resendVerification);
 /**
  * @swagger
  * /auth/verify-email:
