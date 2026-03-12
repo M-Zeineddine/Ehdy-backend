@@ -118,6 +118,26 @@ async function getMerchantById(merchantId) {
 }
 
 /**
+ * List merchant items across all merchants (for popular gifts feed).
+ */
+async function listMerchantItems({ limit = 6 } = {}) {
+  const result = await query(
+    `SELECT mi.id, mi.name, mi.description, mi.image_url, mi.price, mi.currency_code,
+            mi.merchant_id, m.name as merchant_name,
+            COUNT(gi.id) AS gift_count
+     FROM merchant_items mi
+     JOIN merchants m ON m.id = mi.merchant_id
+     LEFT JOIN gift_instances gi ON gi.merchant_item_id = mi.id
+     WHERE mi.is_active = TRUE AND m.is_active = TRUE AND m.deleted_at IS NULL
+     GROUP BY mi.id, m.name
+     ORDER BY gift_count DESC, mi.created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+/**
  * List all active categories.
  */
 async function listCategories() {
@@ -147,6 +167,7 @@ async function getMerchantForPortal(merchantId) {
 module.exports = {
   listMerchants,
   getMerchantById,
+  listMerchantItems,
   listCategories,
   getMerchantForPortal,
 };

@@ -42,4 +42,14 @@ const listCategories = async (req, res, next) => {
   }
 };
 
-module.exports = { listMerchants, getMerchant, listCategories };
+const listMerchantItems = async (req, res, next) => {
+  try {
+    const { limit } = req.query;
+    const items = await merchantService.listMerchantItems({ limit: limit ? parseInt(limit) : 6 });
+    return successResponse(res, { items });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = { listMerchants, getMerchant, listCategories, listMerchantItems };

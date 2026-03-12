@@ -17,6 +17,7 @@ const { validate } = require('../middleware/validation');
  *         description: List of categories
  */
 router.get('/categories', merchantController.listCategories);
+router.get('/items', merchantController.listMerchantItems);
 
 /**
  * @swagger
