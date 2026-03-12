@@ -40,8 +40,13 @@ async function signup({ email, password, first_name, last_name, phone, country_c
   const existing = await query('SELECT id, is_email_verified FROM users WHERE email = $1', [email.toLowerCase()]);
   if (existing.rows.length > 0) {
     if (!existing.rows[0].is_email_verified) {
-      await sendVerificationEmail(email.toLowerCase());
-      throw new AppError('Account pending verification. A new code has been sent to your email.', 409, 'EMAIL_UNVERIFIED');
+      // Check if a valid code already exists — if not, send a fresh one
+      const redis = await getRedisClient();
+      const existingCode = await redis.get(`email_verify:${email.toLowerCase()}`);
+      if (!existingCode) {
+        await sendVerificationEmail(email.toLowerCase());
+      }
+      throw new AppError('Account pending verification. Please check your email for the code.', 409, 'EMAIL_UNVERIFIED');
     }
     throw new AppError('Email address is already registered', 409, 'EMAIL_EXISTS');
   }
