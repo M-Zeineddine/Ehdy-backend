@@ -37,8 +37,12 @@ function generateRefreshToken(userId) {
  */
 async function signup({ email, password, first_name, last_name, phone, country_code }) {
   // Check if email already exists
-  const existing = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+  const existing = await query('SELECT id, is_email_verified FROM users WHERE email = $1', [email.toLowerCase()]);
   if (existing.rows.length > 0) {
+    if (!existing.rows[0].is_email_verified) {
+      await sendVerificationEmail(email.toLowerCase());
+      throw new AppError('Account pending verification. A new code has been sent to your email.', 409, 'EMAIL_UNVERIFIED');
+    }
     throw new AppError('Email address is already registered', 409, 'EMAIL_EXISTS');
   }
 
