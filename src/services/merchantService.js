@@ -94,18 +94,26 @@ async function getMerchantById(merchantId) {
 
   const merchant = result.rows[0];
 
-  // Get active gift cards
-  const giftCards = await query(
-    `SELECT id, name, description, type, is_store_credit, credit_amount,
-            item_name, item_price, item_image_url, currency_code, image_url,
-            valid_from_days, valid_until_days, created_at
-     FROM gift_cards
+  // Get merchant items
+  const items = await query(
+    `SELECT id, name, description, image_url, price, currency_code, item_sku
+     FROM merchant_items
      WHERE merchant_id = $1 AND is_active = TRUE
-     ORDER BY type, credit_amount ASC NULLS LAST`,
+     ORDER BY name ASC`,
     [merchantId]
   );
 
-  merchant.gift_cards = giftCards.rows;
+  // Get store credit presets
+  const storeCredits = await query(
+    `SELECT id, amount, currency_code
+     FROM store_credit_presets
+     WHERE merchant_id = $1 AND is_active = TRUE
+     ORDER BY amount ASC`,
+    [merchantId]
+  );
+
+  merchant.items = items.rows;
+  merchant.store_credit_presets = storeCredits.rows;
   return merchant;
 }
 
