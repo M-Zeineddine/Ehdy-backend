@@ -5,13 +5,14 @@ const { successResponse, paginatedResponse, sanitizeMerchant } = require('../uti
 
 const listMerchants = async (req, res, next) => {
   try {
-    const { category_id, search, country_code, page, limit } = req.query;
+    const { category_id, search, country_code, page, limit, featured } = req.query;
     const result = await merchantService.listMerchants({
       category_id,
       search,
       country_code,
       page,
       limit,
+      is_featured: featured === 'true',
     });
     return paginatedResponse(
       res,

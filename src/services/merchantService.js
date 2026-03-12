@@ -6,7 +6,7 @@ const { AppError } = require('../middleware/errorHandler');
 /**
  * List merchants with optional filters.
  */
-async function listMerchants({ category_id, search, country_code, page, limit, is_active = true }) {
+async function listMerchants({ category_id, search, country_code, page, limit, is_active = true, is_featured }) {
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
 
   const conditions = ['m.deleted_at IS NULL'];
@@ -15,6 +15,10 @@ async function listMerchants({ category_id, search, country_code, page, limit, i
 
   if (is_active) {
     conditions.push('m.is_active = TRUE');
+  }
+
+  if (is_featured) {
+    conditions.push('m.is_featured = TRUE');
   }
 
   if (category_id) {
