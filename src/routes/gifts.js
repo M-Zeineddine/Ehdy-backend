@@ -5,6 +5,7 @@ const giftController = require('../controllers/giftController');
 const { authenticate } = require('../middleware/auth');
 const { validate } = require('../middleware/validation');
 const { createDraftValidation, sendGiftValidation, paginationValidation } = require('../utils/validators');
+const { claimLimiter } = require('../middleware/rateLimiter');
 const { body } = require('express-validator');
 
 router.use(authenticate);
@@ -182,11 +183,12 @@ router.use(authenticate);
  *         description: Gift sent, notification delivered to recipient
  */
 router.post('/initiate-payment', giftController.initiatePayment);
+router.post('/confirm-payment', giftController.confirmPayment);
 router.post('/create-draft', createDraftValidation, validate, giftController.createDraft);
 router.get('/sent', paginationValidation, validate, giftController.getSentGifts);
 router.get('/received', paginationValidation, validate, giftController.getReceivedGifts);
 router.post('/send', sendGiftValidation, validate, giftController.sendGift);
-router.post('/claim/:share_code', giftController.claimGift);
+router.post('/claim/:share_code', claimLimiter, giftController.claimGift);
 
 router.put('/:draft_id', createDraftValidation, validate, giftController.updateDraft);
 router.get('/:draft_id/preview', giftController.getDraftPreview);

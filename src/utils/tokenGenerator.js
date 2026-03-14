@@ -5,23 +5,30 @@ const { v4: uuidv4 } = require('uuid');
 
 /**
  * Generate a redemption code in XXXX-XXXX format (e.g., "A1B2-C3D4").
+ * Uses crypto.randomBytes for security.
  */
 function generateRedemptionCode() {
-  const part1 = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const part2 = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `${part1}-${part2}`;
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const bytes = crypto.randomBytes(8);
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars[bytes[i] % chars.length];
+    if (i === 3) code += '-';
+  }
+  return code;
 }
 
 /**
- * Generate a random 12-character alphanumeric share code.
+ * Generate a cryptographically secure 12-character alphanumeric share code.
  */
 function generateShareCode() {
-  // Pad with extra random chars in case substring is shorter than 12
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(12);
   let code = '';
-  while (code.length < 12) {
-    code += Math.random().toString(36).substring(2);
+  for (let i = 0; i < 12; i++) {
+    code += chars[bytes[i] % chars.length];
   }
-  return code.substring(0, 12);
+  return code;
 }
 
 /**

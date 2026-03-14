@@ -65,6 +65,26 @@ async function createTapCharge({ amount, currency = 'USD', metadata = {}, custom
 }
 
 /**
+ * Verify that a Tap charge is in CAPTURED status.
+ * Used by gift/bundle flows to confirm payment before fulfilling.
+ * @param {string} tapChargeId - The Tap charge ID (e.g. chg_xxx)
+ */
+async function verifyPaymentSuccess(tapChargeId) {
+  if (!tapChargeId) {
+    throw new AppError('Payment charge ID is required', 400, 'MISSING_CHARGE_ID');
+  }
+  const charge = await getTapCharge(tapChargeId);
+  if (charge.status !== 'CAPTURED') {
+    throw new AppError(
+      `Payment not completed. Status: ${charge.status}`,
+      400,
+      'PAYMENT_NOT_CAPTURED'
+    );
+  }
+  return charge;
+}
+
+/**
  * Retrieve a Tap charge by ID.
  */
 async function getTapCharge(chargeId) {
@@ -82,4 +102,5 @@ async function getTapCharge(chargeId) {
 module.exports = {
   createTapCharge,
   getTapCharge,
+  verifyPaymentSuccess,
 };

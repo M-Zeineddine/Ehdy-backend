@@ -1,6 +1,8 @@
 'use strict';
 
 const giftService = require('../services/giftService');
+const paymentService = require('../services/paymentService');
+const { AppError } = require('../middleware/errorHandler');
 const { successResponse, paginatedResponse } = require('../utils/formatters');
 
 const createDraft = async (req, res, next) => {
@@ -96,6 +98,24 @@ const initiatePayment = async (req, res, next) => {
   }
 };
 
+const confirmPayment = async (req, res, next) => {
+  try {
+    const { tap_id } = req.body;
+    if (!tap_id) return next(new AppError('tap_id is required', 400, 'MISSING_TAP_ID'));
+
+    // Verify the charge actually succeeded with Tap before fulfilling
+    const charge = await paymentService.getTapCharge(tap_id);
+    if (charge.status !== 'CAPTURED') {
+      return next(new AppError('Charge not captured', 400, 'PAYMENT_NOT_CAPTURED'));
+    }
+
+    await giftService.fulfillGiftFromTap(tap_id);
+    return successResponse(res, {}, 'Gift fulfilled.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   createDraft,
   updateDraft,
@@ -106,4 +126,5 @@ module.exports = {
   getReceivedGifts,
   claimGift,
   initiatePayment,
+  confirmPayment,
 };

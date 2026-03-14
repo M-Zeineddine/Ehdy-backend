@@ -3,6 +3,18 @@
 const { query, withTransaction, buildPagination } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const { generateRedemptionCode, generateShareCode } = require('../utils/tokenGenerator');
+
+/**
+ * Generate a share code that is guaranteed unique in the gifts_sent table.
+ */
+async function generateUniqueShareCode() {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateShareCode();
+    const existing = await query('SELECT 1 FROM gifts_sent WHERE unique_share_link = $1', [code]);
+    if (!existing.rows.length) return code;
+  }
+  throw new AppError('Failed to generate unique share code', 500, 'SHARE_CODE_COLLISION');
+}
 const { generateQRCode } = require('../utils/qrCode');
 const { calculateExpirationDate, getGiftCardById } = require('./giftCardService');
 const notificationService = require('./notificationService');
@@ -226,7 +238,7 @@ async function _createGiftInstanceAndSend(client, { userId, giftCard, draft, str
   // Generate codes
   const redemptionCode = generateRedemptionCode();
   const qrCode = await generateQRCode(redemptionCode);
-  const shareCode = generateShareCode();
+  const shareCode = await generateUniqueShareCode();
   const expirationDate = calculateExpirationDate(giftCard);
 
   const initialBalance =
@@ -492,9 +504,9 @@ async function getReceivedGifts(userId, { page, limit }) {
  */
 async function claimGift(shareCode, userId) {
   return withTransaction(async (client) => {
-    // Get the gift
+    // Lock the row to prevent race conditions (two simultaneous claims)
     const giftResult = await client.query(
-      'SELECT * FROM gifts_sent WHERE unique_share_link = $1',
+      'SELECT * FROM gifts_sent WHERE unique_share_link = $1 FOR UPDATE',
       [shareCode]
     );
 
@@ -615,7 +627,7 @@ async function initiateGiftPayment(userId, {
   const user = userResult.rows[0] || {};
 
   // Generate share link now so it's ready when the recipient gets the link
-  const shareCode = generateShareCode();
+  const shareCode = await generateUniqueShareCode();
 
   // Create pending gifts_sent record
   const sentResult = await query(

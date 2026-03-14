@@ -1,11 +1,46 @@
 'use strict';
 
+const crypto = require('crypto');
 const router = require('express').Router();
 const { fulfillGiftFromTap, failGiftFromTap } = require('../services/giftService');
 const { fulfillPurchase, failPurchase } = require('../services/purchaseService');
 const emailService = require('../services/emailService');
 const { query } = require('../utils/database');
 const logger = require('../utils/logger');
+
+/**
+ * Verify Tap webhook signature.
+ * Tap computes HMAC-SHA256 over "id|amount|currency|status" using your secret key
+ * and sends it as the `hashstring` field in the payload.
+ * See: https://developers.tap.company/docs/webhook
+ */
+function verifyTapSignature(charge) {
+  const secret = process.env.TAP_SECRET_KEY;
+  if (!secret) return true; // skip if key not configured (dev only)
+
+  const hashstring = charge?.hashstring;
+  if (!hashstring) {
+    logger.warn('Tap webhook missing hashstring');
+    return false;
+  }
+
+  const payload = [
+    charge.id,
+    charge.amount,
+    charge.currency,
+    charge.status,
+  ].join('|');
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('hex');
+
+  return crypto.timingSafeEqual(
+    Buffer.from(hashstring, 'hex'),
+    Buffer.from(expected, 'hex')
+  );
+}
 
 /**
  * Stripe webhook handler.
@@ -138,6 +173,11 @@ const tapWebhook = async (req, res) => {
 
       if (!chargeId) {
         logger.warn('Tap webhook missing charge id', { body: req.body });
+        return;
+      }
+
+      if (!verifyTapSignature(charge)) {
+        logger.warn('Tap webhook signature verification failed', { chargeId });
         return;
       }
 

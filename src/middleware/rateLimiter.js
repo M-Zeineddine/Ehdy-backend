@@ -65,4 +65,25 @@ const redemptionLimiter = rateLimit({
   },
 });
 
-module.exports = { generalLimiter, authLimiter, redemptionLimiter };
+/**
+ * Strict limiter for gift claim endpoint — prevents share code brute-forcing.
+ */
+const claimLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: {
+      code: 'CLAIM_RATE_LIMIT_EXCEEDED',
+      message: 'Too many claim attempts, please try again later.',
+    },
+    timestamp: new Date().toISOString(),
+  },
+  handler: (req, res, next, options) => {
+    res.status(options.statusCode).json(options.message);
+  },
+});
+
+module.exports = { generalLimiter, authLimiter, redemptionLimiter, claimLimiter };
