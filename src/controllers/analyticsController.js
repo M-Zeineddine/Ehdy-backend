@@ -69,8 +69,8 @@ const getUserDashboard = async (req, res, next) => {
     const favoriteMerchants = await query(
       `SELECT m.id, m.name, m.logo_url, COUNT(gi.id) as gift_count
        FROM gift_instances gi
-       JOIN gift_cards gc ON gc.id = gi.gift_card_id
-       JOIN merchants m ON m.id = gc.merchant_id
+       JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+       JOIN merchants m ON m.id = mi.merchant_id
        JOIN wallet_items wi ON wi.gift_instance_id = gi.id
        WHERE wi.user_id = $1
        GROUP BY m.id, m.name, m.logo_url
