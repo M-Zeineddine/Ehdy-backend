@@ -666,6 +666,7 @@ async function initiateGiftPayment(userId, {
   return {
     gift_sent_id: giftSentId,
     tap_transaction_url: charge.transaction_url,
+    unique_share_link: shareCode,
     amount,
     currency,
   };

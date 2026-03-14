@@ -26,6 +26,7 @@ const notificationRoutes = require('./routes/notifications');
 const merchantPortalRoutes = require('./routes/merchantPortal');
 const analyticsRoutes = require('./routes/analytics');
 const webhookRoutes = require('./routes/webhooks');
+const giftPageRoutes = require('./routes/giftPage');
 
 const app = express();
 
@@ -138,6 +139,7 @@ app.use('/v1/notifications', notificationRoutes);
 app.use('/v1/merchant', merchantPortalRoutes);
 app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/webhooks', webhookRoutes);
+app.use('/gift', giftPageRoutes);
 
 // ─── 404 and Error Handlers ───────────────────────────────────────────────────
 app.use(notFoundHandler);
