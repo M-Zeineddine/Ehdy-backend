@@ -265,17 +265,17 @@ router.get('/:shareCode', async (req, res) => {
       `SELECT
          gs.sender_name, gs.personal_message, gs.theme, gs.payment_status,
          gs.merchant_item_id, gs.store_credit_preset_id,
-         mi.name      AS item_name,
-         mi.price     AS item_price,
+         mi.name          AS item_name,
+         mi.price         AS item_price,
          mi.currency_code AS item_currency,
-         m.name       AS merchant_name,
-         scp.label    AS credit_label,
-         scp.amount   AS credit_amount,
-         scp.currency_code AS credit_currency
+         scp.amount       AS credit_amount,
+         scp.currency_code AS credit_currency,
+         COALESCE(mi_m.name, scp_m.name) AS merchant_name
        FROM gifts_sent gs
-       LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
-       LEFT JOIN merchants m       ON m.id  = mi.merchant_id
-       LEFT JOIN store_credit_presets scp ON scp.id = gs.store_credit_preset_id
+       LEFT JOIN merchant_items mi        ON mi.id   = gs.merchant_item_id
+       LEFT JOIN merchants mi_m           ON mi_m.id = mi.merchant_id
+       LEFT JOIN store_credit_presets scp ON scp.id  = gs.store_credit_preset_id
+       LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
        WHERE gs.unique_share_link = $1`,
       [shareCode]
     );
@@ -291,8 +291,8 @@ router.get('/:shareCode', async (req, res) => {
     }
 
     const isCredit = !!row.store_credit_preset_id;
-    const itemName    = isCredit ? (row.credit_label || 'Store Credit') : (row.item_name || 'Gift');
-    const merchantName = isCredit ? null : row.merchant_name;
+    const itemName    = isCredit ? `${row.credit_currency} ${row.credit_amount} Store Credit` : (row.item_name || 'Gift');
+    const merchantName = row.merchant_name || null;
     const amount      = isCredit ? row.credit_amount : row.item_price;
     const currency    = isCredit ? row.credit_currency : row.item_currency;
 
