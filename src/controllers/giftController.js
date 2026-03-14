@@ -98,6 +98,33 @@ const initiatePayment = async (req, res, next) => {
   }
 };
 
+const saveRetryDraft = async (req, res, next) => {
+  try {
+    const draft = await giftService.saveRetryDraft(req.userId, req.body);
+    return successResponse(res, { draft_id: draft.id }, 'Draft saved.', 201);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const getRetryDraft = async (req, res, next) => {
+  try {
+    const draft = await giftService.getRetryDraft(req.params.draft_id, req.userId);
+    return successResponse(res, { draft });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const deleteRetryDraft = async (req, res, next) => {
+  try {
+    await giftService.deleteRetryDraft(req.params.draft_id, req.userId);
+    return successResponse(res, {}, 'Draft deleted.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const confirmPayment = async (req, res, next) => {
   try {
     const { tap_id } = req.body;
@@ -127,4 +154,7 @@ module.exports = {
   claimGift,
   initiatePayment,
   confirmPayment,
+  saveRetryDraft,
+  getRetryDraft,
+  deleteRetryDraft,
 };

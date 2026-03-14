@@ -798,6 +798,84 @@ async function failGiftFromTap(tapChargeId) {
   return result.rows[0] || null;
 }
 
+/**
+ * Save a payment-retry draft — lightweight insert of form state before initiating payment.
+ * Returns the new draft id.
+ */
+async function saveRetryDraft(userId, data) {
+  const {
+    merchant_item_id,
+    store_credit_preset_id,
+    sender_name,
+    recipient_name,
+    personal_message,
+    theme,
+    recipient_phone,
+  } = data;
+
+  const result = await query(
+    `INSERT INTO gift_drafts
+       (user_id, merchant_item_id, store_credit_preset_id,
+        sender_name, recipient_name, personal_message, theme, recipient_phone, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft')
+     RETURNING id`,
+    [
+      userId,
+      merchant_item_id || null,
+      store_credit_preset_id || null,
+      sender_name || null,
+      recipient_name || null,
+      personal_message || null,
+      theme || null,
+      recipient_phone || null,
+    ]
+  );
+
+  return result.rows[0];
+}
+
+/**
+ * Get a draft with joined item/merchant details for restoring the gift form.
+ */
+async function getRetryDraft(draftId, userId) {
+  const result = await query(
+    `SELECT
+       gd.id,
+       gd.merchant_item_id,
+       gd.store_credit_preset_id,
+       gd.sender_name,
+       gd.recipient_name,
+       gd.personal_message,
+       gd.theme,
+       gd.recipient_phone,
+       COALESCE(mi.name, (scp.amount::text || ' ' || scp.currency_code)) AS item_name,
+       mi.description                                                      AS item_description,
+       COALESCE(mi.price, scp.amount)                                     AS item_price,
+       COALESCE(mi.currency_code, scp.currency_code)                      AS item_currency,
+       mi.image_url                                                        AS item_image,
+       m.id                                                                AS merchant_id,
+       m.name                                                              AS merchant_name,
+       m.logo_url                                                          AS merchant_logo,
+       (gd.store_credit_preset_id IS NOT NULL)                            AS is_credit
+     FROM gift_drafts gd
+     LEFT JOIN merchant_items mi ON mi.id = gd.merchant_item_id
+     LEFT JOIN store_credit_presets scp ON scp.id = gd.store_credit_preset_id
+     LEFT JOIN merchants m ON m.id = COALESCE(mi.merchant_id, scp.merchant_id)
+     WHERE gd.id = $1 AND gd.user_id = $2`,
+    [draftId, userId]
+  );
+
+  if (!result.rows.length) throw new AppError('Draft not found', 404, 'DRAFT_NOT_FOUND');
+  return result.rows[0];
+}
+
+/**
+ * Delete a retry draft (called after payment succeeds).
+ */
+async function deleteRetryDraft(draftId, userId) {
+  await query('DELETE FROM gift_drafts WHERE id = $1 AND user_id = $2', [draftId, userId]);
+}
+
 module.exports = {
   createDraft,
   updateDraft,
@@ -811,4 +889,7 @@ module.exports = {
   initiateGiftPayment,
   fulfillGiftFromTap,
   failGiftFromTap,
+  saveRetryDraft,
+  getRetryDraft,
+  deleteRetryDraft,
 };

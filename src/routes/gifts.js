@@ -184,6 +184,9 @@ router.use(authenticate);
  */
 router.post('/initiate-payment', giftController.initiatePayment);
 router.post('/confirm-payment', giftController.confirmPayment);
+router.post('/drafts', giftController.saveRetryDraft);
+router.get('/drafts/:draft_id', giftController.getRetryDraft);
+router.delete('/drafts/:draft_id', giftController.deleteRetryDraft);
 router.post('/create-draft', createDraftValidation, validate, giftController.createDraft);
 router.get('/sent', paginationValidation, validate, giftController.getSentGifts);
 router.get('/received', paginationValidation, validate, giftController.getReceivedGifts);
