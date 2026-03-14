@@ -566,6 +566,225 @@ async function claimGift(shareCode, userId) {
   });
 }
 
+// ── Tap Payments flow ────────────────────────────────────────────────────────
+
+/**
+ * Create a pending gifts_sent record and a Tap charge.
+ * Returns the Tap hosted payment URL for the app to open.
+ */
+async function initiateGiftPayment(userId, {
+  merchant_item_id,
+  store_credit_preset_id,
+  sender_name,
+  recipient_name,
+  recipient_phone,
+  personal_message,
+  theme,
+}) {
+  const { createTapCharge } = require('./paymentService');
+
+  // Resolve item and price
+  let amount, itemRow;
+  if (merchant_item_id) {
+    const r = await query(
+      'SELECT id, price, currency_code FROM merchant_items WHERE id = $1 AND is_active = TRUE',
+      [merchant_item_id]
+    );
+    if (!r.rows.length) throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
+    itemRow = r.rows[0];
+    amount = parseFloat(itemRow.price);
+  } else if (store_credit_preset_id) {
+    const r = await query(
+      'SELECT id, amount, currency_code FROM store_credit_presets WHERE id = $1 AND is_active = TRUE',
+      [store_credit_preset_id]
+    );
+    if (!r.rows.length) throw new AppError('Store credit preset not found', 404, 'ITEM_NOT_FOUND');
+    itemRow = r.rows[0];
+    amount = parseFloat(itemRow.amount);
+  } else {
+    throw new AppError('merchant_item_id or store_credit_preset_id is required', 400, 'MISSING_ITEM');
+  }
+
+  const currency = itemRow.currency_code || 'USD';
+
+  // Get sender info for Tap customer object
+  const userResult = await query(
+    'SELECT email, first_name FROM users WHERE id = $1',
+    [userId]
+  );
+  const user = userResult.rows[0] || {};
+
+  // Generate share link now so it's ready when the recipient gets the link
+  const shareCode = generateShareCode();
+
+  // Create pending gifts_sent record
+  const sentResult = await query(
+    `INSERT INTO gifts_sent
+       (sender_user_id, merchant_item_id, store_credit_preset_id,
+        sender_name, recipient_name, recipient_phone,
+        personal_message, theme, unique_share_link, payment_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')
+     RETURNING id`,
+    [
+      userId,
+      merchant_item_id || null,
+      store_credit_preset_id || null,
+      sender_name || null,
+      recipient_name || null,
+      recipient_phone || null,
+      personal_message || null,
+      theme || null,
+      shareCode,
+    ]
+  );
+
+  const giftSentId = sentResult.rows[0].id;
+
+  // Build webhook + redirect URLs
+  const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3000}`;
+  const postUrl = `${backendUrl}/v1/webhooks/tap`;
+  const redirectUrl = `kado://payment/callback`;
+
+  // Create Tap charge
+  const charge = await createTapCharge({
+    amount,
+    currency,
+    metadata: { gift_sent_id: giftSentId, kado_user_id: userId },
+    customer: { first_name: user.first_name || sender_name || 'Customer', email: user.email },
+    redirectUrl,
+    postUrl,
+  });
+
+  // Store tap_charge_id on the gifts_sent row
+  await query(
+    'UPDATE gifts_sent SET tap_charge_id = $1 WHERE id = $2',
+    [charge.id, giftSentId]
+  );
+
+  logger.info('Gift payment initiated', { giftSentId, chargeId: charge.id, amount, currency });
+
+  return {
+    gift_sent_id: giftSentId,
+    tap_transaction_url: charge.transaction_url,
+    amount,
+    currency,
+  };
+}
+
+/**
+ * Called from the Tap webhook when a charge is CAPTURED.
+ * Creates the gift_instance, marks gifts_sent as paid, adds to wallet if recipient has account.
+ */
+async function fulfillGiftFromTap(tapChargeId) {
+  return withTransaction(async (client) => {
+    // Find the pending gift
+    const giftResult = await client.query(
+      `SELECT * FROM gifts_sent WHERE tap_charge_id = $1 AND payment_status = 'pending'`,
+      [tapChargeId]
+    );
+
+    if (!giftResult.rows.length) {
+      logger.warn('Gift not found or already fulfilled', { tapChargeId });
+      return null;
+    }
+
+    const gift = giftResult.rows[0];
+
+    // Resolve item details
+    let initialBalance = null;
+    let currencyCode = 'USD';
+    let expirationDate = null;
+
+    if (gift.merchant_item_id) {
+      const r = await client.query(
+        'SELECT currency_code FROM merchant_items WHERE id = $1',
+        [gift.merchant_item_id]
+      );
+      if (r.rows.length) currencyCode = r.rows[0].currency_code;
+    } else if (gift.store_credit_preset_id) {
+      const r = await client.query(
+        'SELECT amount, currency_code FROM store_credit_presets WHERE id = $1',
+        [gift.store_credit_preset_id]
+      );
+      if (r.rows.length) {
+        initialBalance = parseFloat(r.rows[0].amount);
+        currencyCode = r.rows[0].currency_code;
+      }
+    }
+
+    // Generate redemption code + QR
+    const redemptionCode = generateRedemptionCode();
+    const qrCode = await generateQRCode(redemptionCode);
+
+    // Create gift_instance
+    const instanceResult = await client.query(
+      `INSERT INTO gift_instances
+         (merchant_item_id, store_credit_preset_id, redemption_code, redemption_qr_code,
+          current_balance, initial_balance, currency_code, expiration_date, gift_sent_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [
+        gift.merchant_item_id || null,
+        gift.store_credit_preset_id || null,
+        redemptionCode,
+        qrCode,
+        initialBalance,
+        initialBalance,
+        currencyCode,
+        expirationDate,
+        gift.id,
+      ]
+    );
+
+    const instance = instanceResult.rows[0];
+
+    // Mark gift as paid
+    await client.query(
+      `UPDATE gifts_sent SET payment_status = 'paid', updated_at = NOW() WHERE id = $1`,
+      [gift.id]
+    );
+
+    // Auto-add to wallet if recipient has an account (matched by phone)
+    if (gift.recipient_phone) {
+      const recipResult = await client.query(
+        `SELECT id FROM users WHERE phone = $1 AND deleted_at IS NULL`,
+        [gift.recipient_phone]
+      );
+      if (recipResult.rows.length) {
+        const recipUserId = recipResult.rows[0].id;
+        await client.query(
+          `UPDATE gifts_sent SET recipient_user_id = $1 WHERE id = $2`,
+          [recipUserId, gift.id]
+        );
+        await client.query(
+          `INSERT INTO wallet_items (user_id, gift_instance_id, sender_user_id, gift_sent_id)
+           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+          [recipUserId, instance.id, gift.sender_user_id, gift.id]
+        );
+      }
+    }
+
+    logger.info('Gift fulfilled from Tap payment', { giftSentId: gift.id, tapChargeId });
+    return gift;
+  });
+}
+
+/**
+ * Mark a gift as failed (called from Tap webhook on FAILED/CANCELLED).
+ */
+async function failGiftFromTap(tapChargeId) {
+  const result = await query(
+    `UPDATE gifts_sent SET payment_status = 'failed', updated_at = NOW()
+     WHERE tap_charge_id = $1 AND payment_status = 'pending'
+     RETURNING id`,
+    [tapChargeId]
+  );
+  if (result.rows.length) {
+    logger.info('Gift payment failed', { tapChargeId, giftSentId: result.rows[0].id });
+  }
+  return result.rows[0] || null;
+}
+
 module.exports = {
   createDraft,
   updateDraft,
@@ -576,4 +795,7 @@ module.exports = {
   getSentGifts,
   getReceivedGifts,
   claimGift,
+  initiateGiftPayment,
+  fulfillGiftFromTap,
+  failGiftFromTap,
 };

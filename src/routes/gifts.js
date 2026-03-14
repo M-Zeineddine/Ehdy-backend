@@ -181,6 +181,7 @@ router.use(authenticate);
  *       200:
  *         description: Gift sent, notification delivered to recipient
  */
+router.post('/initiate-payment', giftController.initiatePayment);
 router.post('/create-draft', createDraftValidation, validate, giftController.createDraft);
 router.get('/sent', paginationValidation, validate, giftController.getSentGifts);
 router.get('/received', paginationValidation, validate, giftController.getReceivedGifts);

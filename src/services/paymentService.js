@@ -1,125 +1,85 @@
 'use strict';
 
-const stripe = require('../config/stripe');
+const tap = require('../config/tap');
 const { AppError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
 /**
- * Create a Stripe PaymentIntent.
+ * Create a Tap charge and return the hosted payment URL.
+ *
+ * @param {object} opts
+ * @param {number}  opts.amount        - Amount in major units (e.g. 25.00)
+ * @param {string}  opts.currency      - ISO currency code (default 'USD')
+ * @param {object}  opts.metadata      - Key/value metadata stored on the charge
+ * @param {object}  opts.customer      - { first_name, email } for Tap
+ * @param {string}  opts.redirectUrl   - Deep link back to the app (e.g. kado://payment/callback)
+ * @param {string}  opts.postUrl       - Webhook URL for Tap to POST charge updates
+ * @returns {Promise<{ id: string, transaction_url: string }>}
  */
-async function createPaymentIntent({ amount, currency = 'usd', metadata = {}, customerId }) {
-  try {
-    const params = {
-      amount: Math.round(amount * 100), // Convert to cents
-      currency: currency.toLowerCase(),
-      metadata,
-      automatic_payment_methods: {
-        enabled: true,
-      },
-    };
-
-    if (customerId) {
-      params.customer = customerId;
-    }
-
-    const paymentIntent = await stripe.paymentIntents.create(params);
-
-    logger.info('Payment intent created', {
-      paymentIntentId: paymentIntent.id,
-      amount,
-      currency,
-    });
-
-    return paymentIntent;
-  } catch (err) {
-    logger.error('Failed to create payment intent', { error: err.message, amount, currency });
-    throw new AppError(`Payment initialization failed: ${err.message}`, 502, 'PAYMENT_INIT_FAILED');
+async function createTapCharge({ amount, currency = 'USD', metadata = {}, customer = {}, redirectUrl, postUrl }) {
+  if (!tap.secretKey) {
+    throw new AppError('Tap secret key not configured', 500, 'TAP_NOT_CONFIGURED');
   }
-}
 
-/**
- * Retrieve a PaymentIntent from Stripe.
- */
-async function getPaymentIntent(paymentIntentId) {
-  try {
-    return await stripe.paymentIntents.retrieve(paymentIntentId);
-  } catch (err) {
-    logger.error('Failed to retrieve payment intent', { paymentIntentId, error: err.message });
-    throw new AppError('Payment record not found', 404, 'PAYMENT_NOT_FOUND');
-  }
-}
+  const body = {
+    amount,
+    currency: currency.toUpperCase(),
+    customer_initiated: true,
+    threeDSecure: true,
+    save_card: false,
+    description: 'Kado Gift Purchase',
+    metadata,
+    reference: { transaction: `kado_${metadata.gift_sent_id || Date.now()}` },
+    receipt: { email: false, sms: false },
+    customer: {
+      first_name: customer.first_name || 'Customer',
+      email: customer.email || undefined,
+    },
+    source: { id: 'src_all' },
+    post: { url: postUrl },
+    redirect: { url: redirectUrl },
+  };
 
-/**
- * Verify that a PaymentIntent succeeded.
- */
-async function verifyPaymentSuccess(paymentIntentId) {
-  const paymentIntent = await getPaymentIntent(paymentIntentId);
-  if (paymentIntent.status !== 'succeeded') {
+  const response = await fetch(`${tap.baseUrl}/charges`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${tap.secretKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    logger.error('Tap charge creation failed', { status: response.status, data });
     throw new AppError(
-      `Payment has not been completed (status: ${paymentIntent.status})`,
-      400,
-      'PAYMENT_NOT_COMPLETED'
+      `Payment initialization failed: ${data?.errors?.[0]?.description || response.statusText}`,
+      502,
+      'PAYMENT_INIT_FAILED'
     );
   }
-  return paymentIntent;
+
+  logger.info('Tap charge created', { chargeId: data.id, amount, currency });
+  return { id: data.id, transaction_url: data.transaction?.url };
 }
 
 /**
- * Create or retrieve a Stripe customer for a user.
+ * Retrieve a Tap charge by ID.
  */
-async function getOrCreateStripeCustomer(userId, email, name) {
-  try {
-    const customer = await stripe.customers.create({
-      email,
-      name: name || email,
-      metadata: { kado_user_id: userId },
-    });
-    logger.info('Stripe customer created', { customerId: customer.id, userId });
-    return customer;
-  } catch (err) {
-    logger.error('Failed to create Stripe customer', { userId, error: err.message });
-    throw new AppError('Failed to set up payment customer', 502, 'STRIPE_CUSTOMER_ERROR');
-  }
-}
+async function getTapCharge(chargeId) {
+  const response = await fetch(`${tap.baseUrl}/charges/${chargeId}`, {
+    headers: { Authorization: `Bearer ${tap.secretKey}` },
+  });
 
-/**
- * Process a refund for a charge.
- */
-async function createRefund(chargeId, amount) {
-  try {
-    const params = { charge: chargeId };
-    if (amount) {
-      params.amount = Math.round(amount * 100);
-    }
-    const refund = await stripe.refunds.create(params);
-    logger.info('Refund created', { refundId: refund.id, chargeId });
-    return refund;
-  } catch (err) {
-    logger.error('Failed to create refund', { chargeId, error: err.message });
-    throw new AppError(`Refund failed: ${err.message}`, 502, 'REFUND_FAILED');
+  if (!response.ok) {
+    throw new AppError('Charge not found', 404, 'PAYMENT_NOT_FOUND');
   }
-}
 
-/**
- * Construct Stripe webhook event from raw body and signature.
- */
-function constructWebhookEvent(rawBody, signature) {
-  try {
-    return stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    throw new AppError(`Webhook signature verification failed: ${err.message}`, 400, 'WEBHOOK_SIGNATURE_INVALID');
-  }
+  return response.json();
 }
 
 module.exports = {
-  createPaymentIntent,
-  getPaymentIntent,
-  verifyPaymentSuccess,
-  getOrCreateStripeCustomer,
-  createRefund,
-  constructWebhookEvent,
+  createTapCharge,
+  getTapCharge,
 };

@@ -87,6 +87,15 @@ const claimGift = async (req, res, next) => {
   }
 };
 
+const initiatePayment = async (req, res, next) => {
+  try {
+    const result = await giftService.initiateGiftPayment(req.userId, req.body);
+    return successResponse(res, result, 'Payment initiated.', 201);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   createDraft,
   updateDraft,
@@ -96,4 +105,5 @@ module.exports = {
   getSentGifts,
   getReceivedGifts,
   claimGift,
+  initiatePayment,
 };

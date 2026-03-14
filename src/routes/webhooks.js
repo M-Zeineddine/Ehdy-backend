@@ -1,7 +1,7 @@
 'use strict';
 
 const router = require('express').Router();
-const { constructWebhookEvent } = require('../services/paymentService');
+const { fulfillGiftFromTap, failGiftFromTap } = require('../services/giftService');
 const { fulfillPurchase, failPurchase } = require('../services/purchaseService');
 const emailService = require('../services/emailService');
 const { query } = require('../utils/database');
@@ -121,5 +121,41 @@ const stripeWebhook = async (req, res) => {
 };
 
 router.post('/stripe', stripeWebhook);
+
+/**
+ * Tap Payments webhook handler.
+ * Tap POSTs the full charge object to this URL on status changes.
+ */
+const tapWebhook = async (req, res) => {
+  // Acknowledge immediately — Tap expects a 200 quickly
+  res.status(200).json({ received: true });
+
+  setImmediate(async () => {
+    try {
+      const charge = req.body;
+      const chargeId = charge?.id;
+      const status = charge?.status;
+
+      if (!chargeId) {
+        logger.warn('Tap webhook missing charge id', { body: req.body });
+        return;
+      }
+
+      logger.info('Tap webhook received', { chargeId, status });
+
+      if (status === 'CAPTURED') {
+        await fulfillGiftFromTap(chargeId);
+      } else if (status === 'FAILED' || status === 'CANCELLED') {
+        await failGiftFromTap(chargeId);
+      } else {
+        logger.debug('Unhandled Tap charge status', { chargeId, status });
+      }
+    } catch (err) {
+      logger.error('Error processing Tap webhook', { error: err.message, stack: err.stack });
+    }
+  });
+};
+
+router.post('/tap', tapWebhook);
 
 module.exports = router;
