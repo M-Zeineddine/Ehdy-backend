@@ -7,9 +7,9 @@ const poolConfig = {
   database: process.env.DB_NAME || 'kado_db',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'password',
-  max: parseInt(process.env.DB_MAX_CONNECTIONS, 10) || 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  max: parseInt(process.env.DB_MAX_CONNECTIONS, 10) || 5,
+  idleTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 };
 
@@ -34,7 +34,7 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  // Do not exit — let pg-pool recover the connection automatically
 });
 
 module.exports = pool;
