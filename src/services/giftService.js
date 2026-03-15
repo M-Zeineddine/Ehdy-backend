@@ -439,8 +439,9 @@ async function createGiftInstancesFromPurchase(client, purchase) {
 /**
  * Get sent gifts for a user.
  */
-async function getSentGifts(userId, { page, limit }) {
+async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+  const order = sort_order === 'asc' ? 'ASC' : 'DESC';
 
   const countResult = await query(
     `SELECT COUNT(*) FROM gifts_sent WHERE sender_user_id = $1 AND payment_status = 'paid'`,
@@ -468,7 +469,7 @@ async function getSentGifts(userId, { page, limit }) {
      LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
      LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
      WHERE gs.sender_user_id = $1 AND gs.payment_status = 'paid'
-     ORDER BY gs.sent_at DESC
+     ORDER BY gs.sent_at ${order}
      LIMIT $2 OFFSET $3`,
     [userId, lim, offset]
   );
@@ -482,13 +483,27 @@ async function getSentGifts(userId, { page, limit }) {
 /**
  * Get received gifts for a user.
  */
-async function getReceivedGifts(userId, { page, limit }) {
+async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', redemption_status }) {
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+  const order = sort_order === 'asc' ? 'ASC' : 'DESC';
+  const statusParam = redemption_status || null;
+
+  // Inline CASE repeated in WHERE so we can filter on the computed status column
+  const statusCase = `CASE
+         WHEN gi.is_redeemed = TRUE THEN 'redeemed'
+         WHEN gi.current_balance IS NOT NULL
+          AND gi.initial_balance  IS NOT NULL
+          AND gi.current_balance < gi.initial_balance THEN 'partially_redeemed'
+         ELSE 'active'
+       END`;
+  const statusFilter = `AND ($2::text IS NULL OR (${statusCase}) = $2)`;
 
   const countResult = await query(
     `SELECT COUNT(*) FROM gifts_sent gs
-     WHERE (gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1) AND gs.payment_status = 'paid'`,
-    [userId]
+     LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
+     WHERE (gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1) AND gs.payment_status = 'paid'
+     ${statusFilter}`,
+    [userId, statusParam]
   );
   const total = parseInt(countResult.rows[0].count, 10);
 
@@ -508,13 +523,7 @@ async function getReceivedGifts(userId, { page, limit }) {
        scp_m.name        AS credit_merchant_name,
        u.first_name      AS sender_first_name,
        u.last_name       AS sender_last_name,
-       CASE
-         WHEN gi.is_redeemed = TRUE THEN 'redeemed'
-         WHEN gi.current_balance IS NOT NULL
-          AND gi.initial_balance  IS NOT NULL
-          AND gi.current_balance < gi.initial_balance THEN 'partially_redeemed'
-         ELSE 'active'
-       END AS redemption_status
+       ${statusCase} AS redemption_status
      FROM gifts_sent gs
      LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
      LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
@@ -523,9 +532,10 @@ async function getReceivedGifts(userId, { page, limit }) {
      LEFT JOIN users u                  ON u.id     = gs.sender_user_id
      LEFT JOIN gift_instances gi        ON gi.gift_sent_id = gs.id
      WHERE (gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1) AND gs.payment_status = 'paid'
-     ORDER BY gs.sent_at DESC
-     LIMIT $2 OFFSET $3`,
-    [userId, lim, offset]
+     ${statusFilter}
+     ORDER BY gs.sent_at ${order}
+     LIMIT $3 OFFSET $4`,
+    [userId, statusParam, lim, offset]
   );
 
   return {

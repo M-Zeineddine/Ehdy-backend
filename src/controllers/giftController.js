@@ -61,8 +61,8 @@ const sendGift = async (req, res, next) => {
 
 const getSentGifts = async (req, res, next) => {
   try {
-    const { page, limit } = req.query;
-    const result = await giftService.getSentGifts(req.userId, { page, limit });
+    const { page, limit, sort_order } = req.query;
+    const result = await giftService.getSentGifts(req.userId, { page, limit, sort_order });
     return paginatedResponse(res, result.gifts, result.pagination);
   } catch (err) {
     return next(err);
@@ -71,8 +71,8 @@ const getSentGifts = async (req, res, next) => {
 
 const getReceivedGifts = async (req, res, next) => {
   try {
-    const { page, limit } = req.query;
-    const result = await giftService.getReceivedGifts(req.userId, { page, limit });
+    const { page, limit, sort_order, redemption_status } = req.query;
+    const result = await giftService.getReceivedGifts(req.userId, { page, limit, sort_order, redemption_status });
     return paginatedResponse(res, result.gifts, result.pagination);
   } catch (err) {
     return next(err);
