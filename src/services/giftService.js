@@ -507,13 +507,21 @@ async function getReceivedGifts(userId, { page, limit }) {
        scp.currency_code AS credit_currency,
        scp_m.name        AS credit_merchant_name,
        u.first_name      AS sender_first_name,
-       u.last_name       AS sender_last_name
+       u.last_name       AS sender_last_name,
+       CASE
+         WHEN gi.is_redeemed = TRUE THEN 'redeemed'
+         WHEN gi.current_balance IS NOT NULL
+          AND gi.initial_balance  IS NOT NULL
+          AND gi.current_balance < gi.initial_balance THEN 'partially_redeemed'
+         ELSE 'active'
+       END AS redemption_status
      FROM gifts_sent gs
      LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
      LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
      LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
      LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
      LEFT JOIN users u                  ON u.id     = gs.sender_user_id
+     LEFT JOIN gift_instances gi        ON gi.gift_sent_id = gs.id
      WHERE (gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1) AND gs.payment_status = 'paid'
      ORDER BY gs.sent_at DESC
      LIMIT $2 OFFSET $3`,
