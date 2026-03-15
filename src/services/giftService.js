@@ -443,18 +443,31 @@ async function getSentGifts(userId, { page, limit }) {
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
 
   const countResult = await query(
-    'SELECT COUNT(*) FROM gifts_sent WHERE sender_user_id = $1',
+    `SELECT COUNT(*) FROM gifts_sent WHERE sender_user_id = $1 AND payment_status = 'paid'`,
     [userId]
   );
   const total = parseInt(countResult.rows[0].count, 10);
 
   const result = await query(
-    `SELECT gs.*, gc.name as gift_card_name, gc.image_url as gift_card_image,
-            m.name as merchant_name, m.logo_url as merchant_logo_url
+    `SELECT
+       gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme,
+       gs.payment_status, gs.unique_share_link, gs.is_claimed, gs.claimed_at, gs.sent_at,
+       gs.merchant_item_id, gs.store_credit_preset_id,
+       mi.name           AS item_name,
+       mi.image_url      AS item_image,
+       mi.price          AS item_price,
+       mi.currency_code  AS item_currency,
+       mi_m.name         AS merchant_name,
+       mi_m.logo_url     AS merchant_logo,
+       scp.amount        AS credit_amount,
+       scp.currency_code AS credit_currency,
+       scp_m.name        AS credit_merchant_name
      FROM gifts_sent gs
-     LEFT JOIN gift_cards gc ON gc.id = gs.gift_card_id
-     LEFT JOIN merchants m ON m.id = gc.merchant_id
-     WHERE gs.sender_user_id = $1
+     LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
+     LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
+     LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
+     LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
+     WHERE gs.sender_user_id = $1 AND gs.payment_status = 'paid'
      ORDER BY gs.sent_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, lim, offset]
@@ -474,20 +487,34 @@ async function getReceivedGifts(userId, { page, limit }) {
 
   const countResult = await query(
     `SELECT COUNT(*) FROM gifts_sent gs
-     WHERE gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1`,
+     WHERE (gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1) AND gs.payment_status = 'paid'`,
     [userId]
   );
   const total = parseInt(countResult.rows[0].count, 10);
 
   const result = await query(
-    `SELECT gs.*, gc.name as gift_card_name, gc.image_url as gift_card_image,
-            m.name as merchant_name, m.logo_url as merchant_logo_url,
-            u.first_name as sender_first_name, u.last_name as sender_last_name
+    `SELECT
+       gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme,
+       gs.payment_status, gs.unique_share_link, gs.is_claimed, gs.claimed_at, gs.sent_at,
+       gs.merchant_item_id, gs.store_credit_preset_id,
+       mi.name           AS item_name,
+       mi.image_url      AS item_image,
+       mi.price          AS item_price,
+       mi.currency_code  AS item_currency,
+       mi_m.name         AS merchant_name,
+       mi_m.logo_url     AS merchant_logo,
+       scp.amount        AS credit_amount,
+       scp.currency_code AS credit_currency,
+       scp_m.name        AS credit_merchant_name,
+       u.first_name      AS sender_first_name,
+       u.last_name       AS sender_last_name
      FROM gifts_sent gs
-     LEFT JOIN gift_cards gc ON gc.id = gs.gift_card_id
-     LEFT JOIN merchants m ON m.id = gc.merchant_id
-     LEFT JOIN users u ON u.id = gs.sender_user_id
-     WHERE gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1
+     LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
+     LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
+     LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
+     LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
+     LEFT JOIN users u                  ON u.id     = gs.sender_user_id
+     WHERE (gs.recipient_user_id = $1 OR gs.claimed_by_user_id = $1) AND gs.payment_status = 'paid'
      ORDER BY gs.sent_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, lim, offset]
