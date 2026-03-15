@@ -103,7 +103,7 @@ function renderItemCards(items) {
   `).join('');
 }
 
-function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
+function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }) {
   const theme = getTheme(gift.theme);
   const [c1, c2] = theme.gradient;
   const senderName = gift.sender_name || 'Someone';
@@ -118,6 +118,14 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
   // Card aspect ratio matches the app: height = width × 0.58
   // We use padding-bottom trick so it scales responsively
   const cardDecorations = renderDecorations(theme.decorations);
+
+  const hasMap = merchant && merchant.lat && merchant.lng;
+  const staticMapUrl = hasMap
+    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${merchant.lat},${merchant.lng}&zoom=14&size=420x200&markers=${merchant.lat},${merchant.lng},red`
+    : null;
+  const googleMapsUrl = hasMap
+    ? `https://www.google.com/maps/search/?api=1&query=${merchant.lat},${merchant.lng}`
+    : null;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -135,7 +143,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
 
     body {
       font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #f9f6f2;
+      background: linear-gradient(180deg, #FDECEA 0%, #ffffff 35%);
       min-height: 100dvh;
       display: flex;
       flex-direction: column;
@@ -148,7 +156,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
       width: 100%;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 40px;
     }
 
     /* ── Header ── */
@@ -164,7 +172,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
       width: 64px;
       height: 64px;
       border-radius: 50%;
-      background: #FFF0EC;
+      background: #FFE3DD;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -359,61 +367,109 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
     }
 
     /* ── How to redeem ── */
-    .redeem-section {
-      padding: 20px 16px;
-    }
+    .redeem-section { padding: 0; }
     .redeem-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 16px;
+      font-size: 17px;
       font-weight: 700;
       color: #1C1410;
-      margin-bottom: 16px;
+      margin-bottom: 20px;
     }
-    .redeem-title .circle-i {
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      border: 2px solid #F07856;
-      color: #F07856;
+    .steps {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 800;
-      flex-shrink: 0;
+      flex-direction: column;
     }
     .step {
       display: flex;
-      gap: 12px;
-      margin-bottom: 14px;
+      gap: 16px;
+      position: relative;
     }
-    .step:last-child { margin-bottom: 0; }
+    .step-left {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+    }
     .step-num {
-      width: 26px;
-      height: 26px;
+      width: 44px;
+      height: 44px;
       border-radius: 50%;
       border: 2px solid #F07856;
       color: #F07856;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
-      font-weight: 800;
+      font-size: 16px;
+      font-weight: 700;
       flex-shrink: 0;
-      margin-top: 1px;
+      background: #fff;
+      position: relative;
+      z-index: 1;
     }
+    .step-line {
+      width: 2px;
+      flex: 1;
+      background: #F0EBE5;
+      margin: 4px 0;
+    }
+    .step:last-child .step-line { display: none; }
+    .step-body {
+      padding-top: 10px;
+      padding-bottom: 28px;
+    }
+    .step:last-child .step-body { padding-bottom: 0; }
     .step-body h4 {
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 700;
       color: #1C1410;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
     .step-body p {
       font-size: 13px;
       color: #7A6A62;
       line-height: 1.4;
+    }
+
+    /* ── Map ── */
+    .map-card {
+      background: #fff;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    }
+    .map-img {
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+      display: block;
+    }
+    .map-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+    }
+    .map-branch-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1C1410;
+      margin-bottom: 3px;
+    }
+    .map-open-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #FDECEA;
+      color: #E8704A;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     /* ── CTA ── */
@@ -432,6 +488,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
       text-align: center;
       transition: opacity 0.15s, transform 0.1s;
       box-shadow: 0 4px 16px rgba(240,120,86,0.35);
+      margin-bottom: 10px;
     }
     .cta-btn:active { opacity: 0.88; transform: scale(0.98); }
 
@@ -508,28 +565,34 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
     </div>
 
     <!-- How to redeem -->
-    <div class="section-card">
-      <div class="redeem-section">
-        <div class="redeem-title">
-          <div class="circle-i">i</div>
-          How to redeem
-        </div>
+    <div class="redeem-section">
+      <p class="redeem-title">How to redeem</p>
+      <div class="steps">
         <div class="step">
-          <div class="step-num">1</div>
+          <div class="step-left">
+            <div class="step-num">1</div>
+            <div class="step-line"></div>
+          </div>
           <div class="step-body">
-            <h4>Visit any ${items[0]?.merchantName ? escapeHtml(items[0].merchantName) + ' branch' : 'participating branch'}</h4>
+            <h4>Visit any ${merchantName ? escapeHtml(merchantName) + ' branch' : 'participating branch'}</h4>
             <p>Show this page or open Kado at the counter.</p>
           </div>
         </div>
         <div class="step">
-          <div class="step-num">2</div>
+          <div class="step-left">
+            <div class="step-num">2</div>
+            <div class="step-line"></div>
+          </div>
           <div class="step-body">
             <h4>Tell the staff you have a Kado gift</h4>
             <p>Let them know what you'd like to redeem.</p>
           </div>
         </div>
         <div class="step">
-          <div class="step-num">3</div>
+          <div class="step-left">
+            <div class="step-num">3</div>
+            <div class="step-line"></div>
+          </div>
           <div class="step-body">
             <h4>Show your QR code or voucher code</h4>
             <p>The staff will scan it to apply your gift.</p>
@@ -538,10 +601,31 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName }) {
       </div>
     </div>
 
-    <!-- CTA -->
-    <a href="kadoapp://open-gift" class="cta-btn">Open in Kado App</a>
+    ${hasMap ? `
+    <!-- Map -->
+    <div class="map-card">
+      <img class="map-img" src="${staticMapUrl}" alt="Location map" />
+      <div class="map-footer">
+        <div>
+          <p class="map-branch-name">${escapeHtml(merchant.name || '')}</p>
+          ${merchant.address ? `<p style="font-size:13px;color:#7A6A62;">${escapeHtml(merchant.address)}${merchant.city ? ', ' + escapeHtml(merchant.city) : ''}</p>` : ''}
+        </div>
+        <a href="${googleMapsUrl}" target="_blank" class="map-open-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+            <circle cx="12" cy="9" r="2.5"/>
+          </svg>
+          Open Map
+        </a>
+      </div>
+    </div>` : ''}
 
-    <p class="footer">Powered by <a href="https://kado-backend.onrender.com">Kado</a></p>
+    <!-- CTA -->
+    <div>
+      <a href="kadoapp://open-gift" class="cta-btn">Open in Kado App</a>
+
+      <p class="footer">Powered by <a href="https://kado-backend.onrender.com">Kado</a></p>
+    </div>
   </div>
 
   <script>
@@ -614,9 +698,17 @@ router.get('/:shareCode', async (req, res) => {
          mi.currency_code AS item_currency,
          mi.image_url     AS item_image,
          mi_m.name        AS item_merchant,
+         mi_m.latitude    AS merchant_lat,
+         mi_m.longitude   AS merchant_lng,
+         mi_m.address     AS merchant_address,
+         mi_m.city        AS merchant_city,
          scp.amount       AS credit_amount,
          scp.currency_code AS credit_currency,
          scp_m.name       AS credit_merchant,
+         scp_m.latitude   AS credit_merchant_lat,
+         scp_m.longitude  AS credit_merchant_lng,
+         scp_m.address    AS credit_merchant_address,
+         scp_m.city       AS credit_merchant_city,
          gi.redemption_code
        FROM gifts_sent gs
        LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
@@ -647,6 +739,11 @@ router.get('/:shareCode', async (req, res) => {
     const itemDetails = isCredit ? null : (row.item_currency && row.item_price ? `${row.item_currency} ${row.item_price}` : null);
     const imageUrl = isCredit ? null : (row.item_image || null);
 
+    const merchantLat = isCredit ? row.credit_merchant_lat : row.merchant_lat;
+    const merchantLng = isCredit ? row.credit_merchant_lng : row.merchant_lng;
+    const merchantAddr = isCredit ? row.credit_merchant_address : row.merchant_address;
+    const merchantCity = isCredit ? row.credit_merchant_city : row.merchant_city;
+
     // items array — bundle gifts will pass multiple entries here
     const items = [{ imageUrl, merchantName, itemName, details: itemDetails }];
 
@@ -655,6 +752,7 @@ router.get('/:shareCode', async (req, res) => {
       items,
       redemptionCode: row.redemption_code || null,
       recipientName: row.recipient_name || null,
+      merchant: { name: merchantName, lat: merchantLat, lng: merchantLng, address: merchantAddr, city: merchantCity },
     }));
   } catch (err) {
     logger.error('Gift page error', { shareCode, error: err.message });
