@@ -47,6 +47,81 @@ const socialLoginValidation = [
   body('id_token').notEmpty().withMessage('ID token is required'),
 ];
 
+// Admin validators
+const adminLoginValidation = [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('password').notEmpty().withMessage('Password is required'),
+];
+
+const adminSetupValidation = [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('password')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+    .withMessage('Password must contain uppercase, lowercase, and a number'),
+  body('first_name').optional().trim().isLength({ max: 100 }),
+  body('last_name').optional().trim().isLength({ max: 100 }),
+  body('bootstrap_secret').optional().isString(),
+];
+
+const adminUserStatusValidation = [
+  body('is_active').isBoolean().withMessage('is_active must be a boolean'),
+];
+
+const adminMerchantUpdateValidation = [
+  body('name').optional().trim().isLength({ min: 1, max: 255 }).withMessage('Merchant name is required'),
+  body('slug').optional().trim().isLength({ max: 255 }),
+  body('description').optional().trim().isLength({ max: 5000 }),
+  body('website_url').optional({ values: 'falsy' }).isURL().withMessage('website_url must be a valid URL'),
+  body('logo_url').optional({ values: 'falsy' }).isURL().withMessage('logo_url must be a valid URL'),
+  body('banner_image_url').optional({ values: 'falsy' }).isURL().withMessage('banner_image_url must be a valid URL'),
+  body('category_id').optional().isUUID().withMessage('category_id must be a valid UUID'),
+  body('country_code').optional().isLength({ min: 2, max: 2 }).withMessage('country_code must be 2 letters'),
+  body('contact_email').optional({ values: 'falsy' }).isEmail().withMessage('contact_email must be valid'),
+  body('contact_phone').optional({ values: 'falsy' }).matches(/^\+?[0-9]{7,15}$/).withMessage('Invalid phone number'),
+  body('is_active').optional().isBoolean(),
+  body('is_verified').optional().isBoolean(),
+  body('is_featured').optional().isBoolean(),
+];
+
+const adminCreateMerchantValidation = [
+  body('name').trim().notEmpty().withMessage('Merchant name is required').isLength({ max: 255 }),
+  body('category_id').isUUID().withMessage('category_id is required'),
+  ...adminMerchantUpdateValidation,
+];
+
+const adminItemUpdateValidation = [
+  body('merchant_id').optional().isUUID().withMessage('merchant_id must be a valid UUID'),
+  body('name').optional().trim().isLength({ min: 1, max: 255 }).withMessage('Item name is required'),
+  body('description').optional().trim().isLength({ max: 5000 }),
+  body('image_url').optional({ values: 'falsy' }).isURL().withMessage('image_url must be a valid URL'),
+  body('price').optional().isFloat({ min: 0.01 }).withMessage('price must be a positive number'),
+  body('currency_code').optional().isLength({ min: 3, max: 3 }).withMessage('currency_code must be 3 letters'),
+  body('item_sku').optional().trim().isLength({ max: 100 }),
+  body('is_active').optional().isBoolean(),
+];
+
+const adminCreateItemValidation = [
+  body('merchant_id').isUUID().withMessage('merchant_id is required'),
+  body('name').trim().notEmpty().withMessage('Item name is required').isLength({ max: 255 }),
+  body('price').isFloat({ min: 0.01 }).withMessage('price must be a positive number'),
+  ...adminItemUpdateValidation,
+];
+
+const adminStoreCreditUpdateValidation = [
+  body('merchant_id').optional().isUUID().withMessage('merchant_id must be a valid UUID'),
+  body('amount').optional().isFloat({ min: 0.01 }).withMessage('amount must be a positive number'),
+  body('currency_code').optional().isLength({ min: 3, max: 3 }).withMessage('currency_code must be 3 letters'),
+  body('is_active').optional().isBoolean(),
+];
+
+const adminCreateStoreCreditValidation = [
+  body('merchant_id').isUUID().withMessage('merchant_id is required'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('amount must be a positive number'),
+  ...adminStoreCreditUpdateValidation,
+];
+
 // User validators
 const updateUserValidation = [
   body('first_name').optional().trim().isLength({ max: 100 }),
@@ -169,6 +244,15 @@ const uuidParamValidation = (paramName = 'id') => [
 module.exports = {
   signupValidation,
   signinValidation,
+  adminLoginValidation,
+  adminSetupValidation,
+  adminUserStatusValidation,
+  adminMerchantUpdateValidation,
+  adminCreateMerchantValidation,
+  adminItemUpdateValidation,
+  adminCreateItemValidation,
+  adminStoreCreditUpdateValidation,
+  adminCreateStoreCreditValidation,
   verifyEmailValidation,
   forgotPasswordValidation,
   resetPasswordValidation,

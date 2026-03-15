@@ -3,6 +3,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const path = require('path');
 const helmet = require('helmet');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
@@ -27,6 +28,7 @@ const merchantPortalRoutes = require('./routes/merchantPortal');
 const analyticsRoutes = require('./routes/analytics');
 const webhookRoutes = require('./routes/webhooks');
 const giftPageRoutes = require('./routes/giftPage');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 
@@ -142,7 +144,9 @@ app.use('/v1/notifications', notificationRoutes);
 app.use('/v1/merchant', merchantPortalRoutes);
 app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/webhooks', webhookRoutes);
+app.use('/v1/admin', adminRoutes);
 app.use('/gift', giftPageRoutes);
+app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 
 // ─── 404 and Error Handlers ───────────────────────────────────────────────────
 app.use(notFoundHandler);
@@ -236,7 +240,7 @@ async function startServer() {
 }
 
 // Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
   logger.error('Unhandled Promise Rejection', {
     reason: reason instanceof Error ? reason.message : reason,
     stack: reason instanceof Error ? reason.stack : undefined,

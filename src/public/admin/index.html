@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kado Owner CMS</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <div id="notice" class="notice" hidden></div>
+
+    <main class="app-shell">
+      <section id="authView" class="auth-view">
+        <div class="auth-brand">
+          <p class="eyebrow">Kado owner console</p>
+          <h1>Run the app from one place.</h1>
+          <p class="lede">
+            Watch growth, manage merchants, control catalog inventory, and keep a close eye on gifts and payments.
+          </p>
+        </div>
+
+        <div class="auth-panels">
+          <article id="setupPanel" class="panel" hidden>
+            <div class="panel-header">
+              <p class="eyebrow">First-time setup</p>
+              <h2>Create the owner account</h2>
+            </div>
+            <form id="setupForm" class="stack-form">
+              <label>
+                <span>First name</span>
+                <input type="text" name="first_name" placeholder="Mohammad" />
+              </label>
+              <label>
+                <span>Last name</span>
+                <input type="text" name="last_name" placeholder="Zeineddine" />
+              </label>
+              <label>
+                <span>Email</span>
+                <input type="email" name="email" placeholder="owner@kado.app" required />
+              </label>
+              <label>
+                <span>Password</span>
+                <input type="password" name="password" placeholder="At least 8 characters" required />
+              </label>
+              <label id="bootstrapSecretField" hidden>
+                <span>Bootstrap secret</span>
+                <input type="password" name="bootstrap_secret" placeholder="Required only if configured" />
+              </label>
+              <button type="submit" class="primary-button">Create owner account</button>
+            </form>
+          </article>
+
+          <article id="loginPanel" class="panel" hidden>
+            <div class="panel-header">
+              <p class="eyebrow">Owner sign in</p>
+              <h2>Welcome back</h2>
+            </div>
+            <form id="loginForm" class="stack-form">
+              <label>
+                <span>Email</span>
+                <input type="email" name="email" placeholder="owner@kado.app" required />
+              </label>
+              <label>
+                <span>Password</span>
+                <input type="password" name="password" placeholder="Password" required />
+              </label>
+              <button type="submit" class="primary-button">Sign in</button>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section id="appView" class="dashboard-view" hidden>
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <p class="eyebrow">Kado CMS</p>
+            <h2>Owner Dashboard</h2>
+          </div>
+          <nav class="nav-list">
+            <button class="nav-item active" data-nav-target="overview">Overview</button>
+            <button class="nav-item" data-nav-target="users">Users</button>
+            <button class="nav-item" data-nav-target="merchants">Merchants</button>
+            <button class="nav-item" data-nav-target="items">Items</button>
+            <button class="nav-item" data-nav-target="credits">Store Credit</button>
+            <button class="nav-item" data-nav-target="gifts">Gifts</button>
+            <button class="nav-item" data-nav-target="purchases">Purchases</button>
+          </nav>
+        </aside>
+
+        <div class="main-panel">
+          <header class="topbar">
+            <div>
+              <p class="eyebrow">App owner controls</p>
+              <h1>Everything important, without leaving the browser.</h1>
+            </div>
+            <div class="topbar-actions">
+              <div id="adminIdentity" class="identity-card"></div>
+              <button id="refreshAllButton" class="ghost-button">Refresh</button>
+              <button id="logoutButton" class="ghost-button">Log out</button>
+            </div>
+          </header>
+
+          <section id="panel-overview" class="content-panel active">
+            <div id="overviewMetrics" class="metrics-grid"></div>
+            <div class="split-layout">
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Gift velocity</p>
+                  <h2>Last 7 days</h2>
+                </div>
+                <div id="trendChart" class="trend-chart"></div>
+              </article>
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Top merchants</p>
+                  <h2>By paid gifts</h2>
+                </div>
+                <div id="topMerchantsList" class="list-stack"></div>
+              </article>
+            </div>
+            <div class="split-layout">
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Recent signups</p>
+                  <h2>Newest users</h2>
+                </div>
+                <div id="recentUsersList" class="list-stack"></div>
+              </article>
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Recent gifts</p>
+                  <h2>Newest paid and pending sends</h2>
+                </div>
+                <div id="recentGiftsList" class="list-stack"></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="panel-users" class="content-panel">
+            <article class="panel">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Users</p>
+                  <h2>Customers and access control</h2>
+                </div>
+                <div class="toolbar">
+                  <input id="usersSearch" type="search" placeholder="Search email, name, phone" />
+                  <select id="usersStatus">
+                    <option value="">All</option>
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                  <button class="ghost-button" data-load-target="users">Apply</button>
+                </div>
+              </div>
+              <div id="usersTable" class="table-shell"></div>
+            </article>
+          </section>
+
+          <section id="panel-merchants" class="content-panel">
+            <div class="split-layout split-form">
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Merchant editor</p>
+                  <h2>Create or update a merchant</h2>
+                </div>
+                <form id="merchantForm" class="grid-form">
+                  <input type="hidden" name="id" />
+                  <label>
+                    <span>Name</span>
+                    <input type="text" name="name" required />
+                  </label>
+                  <label>
+                    <span>Slug</span>
+                    <input type="text" name="slug" placeholder="optional-auto-generated" />
+                  </label>
+                  <label>
+                    <span>Category</span>
+                    <select name="category_id" id="merchantCategory" required></select>
+                  </label>
+                  <label>
+                    <span>Country</span>
+                    <input type="text" name="country_code" maxlength="2" value="LB" />
+                  </label>
+                  <label>
+                    <span>Contact email</span>
+                    <input type="email" name="contact_email" />
+                  </label>
+                  <label>
+                    <span>Contact phone</span>
+                    <input type="text" name="contact_phone" />
+                  </label>
+                  <label>
+                    <span>Website</span>
+                    <input type="url" name="website_url" />
+                  </label>
+                  <label>
+                    <span>Logo URL</span>
+                    <input type="url" name="logo_url" />
+                  </label>
+                  <label class="full-span">
+                    <span>Banner URL</span>
+                    <input type="url" name="banner_image_url" />
+                  </label>
+                  <label class="full-span">
+                    <span>Description</span>
+                    <textarea name="description" rows="4"></textarea>
+                  </label>
+                  <label class="checkbox-row"><input type="checkbox" name="is_active" checked /> Active</label>
+                  <label class="checkbox-row"><input type="checkbox" name="is_verified" /> Verified</label>
+                  <label class="checkbox-row"><input type="checkbox" name="is_featured" /> Featured</label>
+                  <div class="form-actions full-span">
+                    <button type="submit" class="primary-button">Save merchant</button>
+                    <button type="button" id="merchantResetButton" class="ghost-button">Clear</button>
+                  </div>
+                </form>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header tight">
+                  <div>
+                    <p class="eyebrow">Merchant list</p>
+                    <h2>Manage onboarding and visibility</h2>
+                  </div>
+                  <div class="toolbar">
+                    <input id="merchantsSearch" type="search" placeholder="Search merchant or email" />
+                    <select id="merchantsStatus">
+                      <option value="">All</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                    <button class="ghost-button" data-load-target="merchants">Apply</button>
+                  </div>
+                </div>
+                <div id="merchantsTable" class="table-shell"></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="panel-items" class="content-panel">
+            <div class="split-layout split-form">
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Catalog editor</p>
+                  <h2>Merchant gift items</h2>
+                </div>
+                <form id="itemForm" class="grid-form">
+                  <input type="hidden" name="id" />
+                  <label>
+                    <span>Merchant</span>
+                    <select name="merchant_id" id="itemMerchant" required></select>
+                  </label>
+                  <label>
+                    <span>Item name</span>
+                    <input type="text" name="name" required />
+                  </label>
+                  <label>
+                    <span>SKU</span>
+                    <input type="text" name="item_sku" />
+                  </label>
+                  <label>
+                    <span>Price</span>
+                    <input type="number" name="price" step="0.01" min="0.01" required />
+                  </label>
+                  <label>
+                    <span>Currency</span>
+                    <input type="text" name="currency_code" maxlength="3" value="USD" />
+                  </label>
+                  <label class="full-span">
+                    <span>Image URL</span>
+                    <input type="url" name="image_url" />
+                  </label>
+                  <label class="full-span">
+                    <span>Description</span>
+                    <textarea name="description" rows="4"></textarea>
+                  </label>
+                  <label class="checkbox-row"><input type="checkbox" name="is_active" checked /> Active</label>
+                  <div class="form-actions full-span">
+                    <button type="submit" class="primary-button">Save item</button>
+                    <button type="button" id="itemResetButton" class="ghost-button">Clear</button>
+                  </div>
+                </form>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header tight">
+                  <div>
+                    <p class="eyebrow">Gift items</p>
+                    <h2>Search and control inventory</h2>
+                  </div>
+                  <div class="toolbar">
+                    <input id="itemsSearch" type="search" placeholder="Search item, merchant, SKU" />
+                    <select id="itemsStatus">
+                      <option value="">All</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                    <button class="ghost-button" data-load-target="items">Apply</button>
+                  </div>
+                </div>
+                <div id="itemsTable" class="table-shell"></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="panel-credits" class="content-panel">
+            <div class="split-layout split-form">
+              <article class="panel">
+                <div class="panel-header">
+                  <p class="eyebrow">Store credit editor</p>
+                  <h2>Preset amounts by merchant</h2>
+                </div>
+                <form id="creditForm" class="grid-form">
+                  <input type="hidden" name="id" />
+                  <label>
+                    <span>Merchant</span>
+                    <select name="merchant_id" id="creditMerchant" required></select>
+                  </label>
+                  <label>
+                    <span>Amount</span>
+                    <input type="number" name="amount" step="0.01" min="0.01" required />
+                  </label>
+                  <label>
+                    <span>Currency</span>
+                    <input type="text" name="currency_code" maxlength="3" value="USD" />
+                  </label>
+                  <label class="checkbox-row"><input type="checkbox" name="is_active" checked /> Active</label>
+                  <div class="form-actions full-span">
+                    <button type="submit" class="primary-button">Save preset</button>
+                    <button type="button" id="creditResetButton" class="ghost-button">Clear</button>
+                  </div>
+                </form>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header tight">
+                  <div>
+                    <p class="eyebrow">Store credit presets</p>
+                    <h2>Quick visibility and price control</h2>
+                  </div>
+                  <div class="toolbar">
+                    <input id="creditsSearch" type="search" placeholder="Search merchant" />
+                    <select id="creditsStatus">
+                      <option value="">All</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                    <button class="ghost-button" data-load-target="credits">Apply</button>
+                  </div>
+                </div>
+                <div id="creditsTable" class="table-shell"></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="panel-gifts" class="content-panel">
+            <article class="panel">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Gifts</p>
+                  <h2>Gift lifecycle and claim visibility</h2>
+                </div>
+                <div class="toolbar">
+                  <input id="giftsSearch" type="search" placeholder="Search recipient, sender, merchant" />
+                  <select id="giftsStatus">
+                    <option value="">All payments</option>
+                    <option value="paid">Paid</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                  <button class="ghost-button" data-load-target="gifts">Apply</button>
+                </div>
+              </div>
+              <div id="giftsTable" class="table-shell"></div>
+            </article>
+          </section>
+
+          <section id="panel-purchases" class="content-panel">
+            <article class="panel">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Purchases</p>
+                  <h2>Customer checkout monitoring</h2>
+                </div>
+                <div class="toolbar">
+                  <input id="purchasesSearch" type="search" placeholder="Search purchase ID or buyer" />
+                  <select id="purchasesStatus">
+                    <option value="">All payments</option>
+                    <option value="pending">Pending</option>
+                    <option value="succeeded">Succeeded</option>
+                    <option value="failed">Failed</option>
+                    <option value="refunded">Refunded</option>
+                  </select>
+                  <button class="ghost-button" data-load-target="purchases">Apply</button>
+                </div>
+              </div>
+              <div id="purchasesTable" class="table-shell"></div>
+            </article>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/admin/app.js" defer></script>
+  </body>
+</html>

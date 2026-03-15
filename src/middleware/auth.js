@@ -147,4 +147,51 @@ const authenticateMerchant = async (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, optionalAuthenticate, authenticateMerchant };
+/**
+ * Authenticate admin JWT. Attaches req.admin on success.
+ */
+const authenticateAdmin = async (req, res, next) => {
+  try {
+    const token = extractToken(req);
+    if (!token) {
+      return next(new AppError('Authentication token is required', 401, 'TOKEN_REQUIRED'));
+    }
+
+    const decoded = await verifyToken(token, process.env.JWT_SECRET);
+
+    if (decoded.type !== 'admin') {
+      return next(new AppError('Invalid admin token', 401, 'INVALID_TOKEN'));
+    }
+
+    const result = await query(
+      `SELECT id, email, first_name, last_name, role, is_active
+       FROM admin_users
+       WHERE id = $1`,
+      [decoded.adminUserId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(new AppError('Admin user not found', 401, 'USER_NOT_FOUND'));
+    }
+
+    const adminUser = result.rows[0];
+    if (!adminUser.is_active) {
+      return next(new AppError('Admin account is not active', 403, 'ACCOUNT_INACTIVE'));
+    }
+
+    req.admin = adminUser;
+    req.adminUserId = adminUser.id;
+    return next();
+  } catch (err) {
+    logger.warn('Admin authentication failed', { error: err.message });
+    if (err.name === 'TokenExpiredError') {
+      return next(new AppError('Authentication token has expired', 401, 'TOKEN_EXPIRED'));
+    }
+    if (err.name === 'JsonWebTokenError') {
+      return next(new AppError('Invalid authentication token', 401, 'INVALID_TOKEN'));
+    }
+    return next(err);
+  }
+};
+
+module.exports = { authenticate, optionalAuthenticate, authenticateMerchant, authenticateAdmin };
