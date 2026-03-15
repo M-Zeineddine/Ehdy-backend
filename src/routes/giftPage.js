@@ -103,7 +103,7 @@ function renderItemCards(items) {
   `).join('');
 }
 
-function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }) {
+function renderGiftPage({ gift, items, redemptionCode, recipientName, branches = [] }) {
   const theme = getTheme(gift.theme);
   const [c1, c2] = theme.gradient;
   const senderName = gift.sender_name || 'Someone';
@@ -119,13 +119,26 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }
   // We use padding-bottom trick so it scales responsively
   const cardDecorations = renderDecorations(theme.decorations);
 
-  const hasMap = merchant && merchant.lat && merchant.lng;
-  const staticMapUrl = hasMap
-    ? `https://staticmap.openstreetmap.de/staticmap.php?center=${merchant.lat},${merchant.lng}&zoom=14&size=420x200&markers=${merchant.lat},${merchant.lng},red`
-    : null;
+  const mapBranches  = branches.filter(b => b.latitude && b.longitude);
+  const hasMap       = mapBranches.length > 0;
+  const centerLat    = hasMap ? mapBranches.reduce((s, b) => s + parseFloat(b.latitude),  0) / mapBranches.length : 0;
+  const centerLng    = hasMap ? mapBranches.reduce((s, b) => s + parseFloat(b.longitude), 0) / mapBranches.length : 0;
+  const mapSearchQuery = hasMap
+    ? (mapBranches.length === 1
+      ? `${centerLat},${centerLng}`
+      : [merchantName, branches[0]?.city].filter(Boolean).join(' ') || `${centerLat},${centerLng}`)
+    : '';
   const googleMapsUrl = hasMap
-    ? `https://www.google.com/maps/search/?api=1&query=${merchant.lat},${merchant.lng}`
-    : null;
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapSearchQuery)}`
+    : '';
+  const branchesJson = hasMap ? JSON.stringify(mapBranches.map(b => ({
+    lat: parseFloat(b.latitude),
+    lng: parseFloat(b.longitude),
+    name: b.name || '',
+    address: b.address || '',
+    city: b.city || '',
+    mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${parseFloat(b.latitude)},${parseFloat(b.longitude)}`)}`,
+  }))) : '[]';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -138,6 +151,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
+  ${hasMap ? '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />' : ''}
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -442,6 +456,20 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }
       object-fit: cover;
       display: block;
     }
+    .map-embed {
+      width: 100%;
+      height: 180px;
+      border: 0;
+      display: block;
+    }
+    .map-canvas {
+      width: 100%;
+      height: 180px;
+      cursor: pointer;
+    }
+    .leaflet-container {
+      font-family: inherit;
+    }
     .map-footer {
       display: flex;
       align-items: center;
@@ -601,24 +629,13 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }
       </div>
     </div>
 
-    ${hasMap ? `
-    <!-- Map -->
-    <div class="map-card">
-      <img class="map-img" src="${staticMapUrl}" alt="Location map" />
-      <div class="map-footer">
-        <div>
-          <p class="map-branch-name">${escapeHtml(merchant.name || '')}</p>
-          ${merchant.address ? `<p style="font-size:13px;color:#7A6A62;">${escapeHtml(merchant.address)}${merchant.city ? ', ' + escapeHtml(merchant.city) : ''}</p>` : ''}
-        </div>
-        <a href="${googleMapsUrl}" target="_blank" class="map-open-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-            <circle cx="12" cy="9" r="2.5"/>
-          </svg>
-          Open Map
-        </a>
-      </div>
-    </div>` : ''}
+    ${hasMap ? (() => {
+      return `
+    <!-- Branches -->
+    <div class="section-card">
+      <div id="branch-map" class="map-canvas" aria-label="Branches map"></div>
+    </div>`;
+    })() : ''}
 
     <!-- CTA -->
     <div>
@@ -639,6 +656,64 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, merchant }
       });
     }
   </script>
+  ${hasMap ? `
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    (function() {
+      var branches = ${branchesJson};
+      var googleMapsUrl = ${JSON.stringify(googleMapsUrl)};
+      var suppressNextMapClick = false;
+      function openMaps(url) {
+        if (!url) return;
+        window.location.href = url;
+      }
+      var map = L.map('branch-map', {
+        zoomControl: false,
+        scrollWheelZoom: false
+      }).setView([${centerLat}, ${centerLng}], ${mapBranches.length === 1 ? 15 : 13});
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+
+      var bounds = [];
+
+      branches.forEach(function(branch) {
+        var locationLine = [branch.address, branch.city].filter(Boolean).join(', ');
+        var popupContent = document.createElement('div');
+        var title = document.createElement('strong');
+        title.textContent = branch.name;
+        popupContent.appendChild(title);
+
+        if (locationLine) {
+          popupContent.appendChild(document.createElement('br'));
+          popupContent.appendChild(document.createTextNode(locationLine));
+        }
+
+        L.marker([branch.lat, branch.lng])
+          .addTo(map)
+          .bindPopup(popupContent)
+          .on('click', function() {
+            suppressNextMapClick = true;
+            openMaps(branch.mapsUrl || googleMapsUrl);
+          });
+
+        bounds.push([branch.lat, branch.lng]);
+      });
+
+      if (bounds.length > 1) {
+        map.fitBounds(bounds, { padding: [24, 24] });
+      }
+
+      map.on('click', function() {
+        if (suppressNextMapClick) {
+          suppressNextMapClick = false;
+          return;
+        }
+        openMaps(googleMapsUrl);
+      });
+    })();
+  </script>` : ''}
 </body>
 </html>`;
 }
@@ -697,18 +772,12 @@ router.get('/:shareCode', async (req, res) => {
          mi.price         AS item_price,
          mi.currency_code AS item_currency,
          mi.image_url     AS item_image,
+         mi_m.id          AS item_merchant_id,
          mi_m.name        AS item_merchant,
-         mi_m.latitude    AS merchant_lat,
-         mi_m.longitude   AS merchant_lng,
-         mi_m.address     AS merchant_address,
-         mi_m.city        AS merchant_city,
          scp.amount       AS credit_amount,
          scp.currency_code AS credit_currency,
+         scp_m.id         AS credit_merchant_id,
          scp_m.name       AS credit_merchant,
-         scp_m.latitude   AS credit_merchant_lat,
-         scp_m.longitude  AS credit_merchant_lng,
-         scp_m.address    AS credit_merchant_address,
-         scp_m.city       AS credit_merchant_city,
          gi.redemption_code
        FROM gifts_sent gs
        LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
@@ -739,20 +808,29 @@ router.get('/:shareCode', async (req, res) => {
     const itemDetails = isCredit ? null : (row.item_currency && row.item_price ? `${row.item_currency} ${row.item_price}` : null);
     const imageUrl = isCredit ? null : (row.item_image || null);
 
-    const merchantLat = isCredit ? row.credit_merchant_lat : row.merchant_lat;
-    const merchantLng = isCredit ? row.credit_merchant_lng : row.merchant_lng;
-    const merchantAddr = isCredit ? row.credit_merchant_address : row.merchant_address;
-    const merchantCity = isCredit ? row.credit_merchant_city : row.merchant_city;
-
     // items array — bundle gifts will pass multiple entries here
     const items = [{ imageUrl, merchantName, itemName, details: itemDetails }];
+
+    // Fetch branches for the merchant
+    const merchantId = isCredit ? row.credit_merchant_id : row.item_merchant_id;
+    let branches = [];
+    if (merchantId) {
+      const branchResult = await query(
+        `SELECT name, address, city, latitude, longitude
+         FROM merchant_branches
+         WHERE merchant_id = $1 AND is_active = true
+         ORDER BY name`,
+        [merchantId]
+      );
+      branches = branchResult.rows;
+    }
 
     res.send(renderGiftPage({
       gift: row,
       items,
       redemptionCode: row.redemption_code || null,
       recipientName: row.recipient_name || null,
-      merchant: { name: merchantName, lat: merchantLat, lng: merchantLng, address: merchantAddr, city: merchantCity },
+      branches,
     }));
   } catch (err) {
     logger.error('Gift page error', { shareCode, error: err.message });

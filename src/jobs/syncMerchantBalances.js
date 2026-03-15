@@ -32,8 +32,9 @@ async function syncMerchantBalances() {
              COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE AND gi.expiration_date >= CURRENT_DATE) as active_codes,
              COUNT(*) FILTER (WHERE gi.expiration_date < CURRENT_DATE AND gi.is_redeemed = FALSE) as expired_codes
            FROM gift_instances gi
-           JOIN gift_cards gc ON gc.id = gi.gift_card_id
-           WHERE gc.merchant_id = $1`,
+           LEFT JOIN merchant_items mi         ON mi.id  = gi.merchant_item_id
+           LEFT JOIN store_credit_presets scp  ON scp.id = gi.store_credit_preset_id
+           WHERE mi.merchant_id = $1 OR scp.merchant_id = $1`,
           [merchant.id]
         );
 
