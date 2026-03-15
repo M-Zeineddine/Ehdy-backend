@@ -476,11 +476,10 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
       justify-content: space-between;
       padding: 14px 16px;
     }
-    .map-branch-name {
+    .map-merchant-name {
       font-size: 15px;
       font-weight: 700;
       color: #1C1410;
-      margin-bottom: 3px;
     }
     .map-open-btn {
       display: flex;
@@ -629,13 +628,18 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
       </div>
     </div>
 
-    ${hasMap ? (() => {
-      return `
-    <!-- Branches -->
-    <div class="section-card">
+    ${hasMap ? `
+    <!-- Branches map -->
+    <div class="map-card">
       <div id="branch-map" class="map-canvas" aria-label="Branches map"></div>
-    </div>`;
-    })() : ''}
+      <div class="map-footer">
+        <span class="map-merchant-name">${escapeHtml(merchantName)}</span>
+        <a href="${googleMapsUrl}" class="map-open-btn" target="_blank" rel="noopener">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+          Open Map
+        </a>
+      </div>
+    </div>` : ''}
 
     <!-- CTA -->
     <div>
@@ -662,7 +666,6 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
     (function() {
       var branches = ${branchesJson};
       var googleMapsUrl = ${JSON.stringify(googleMapsUrl)};
-      var suppressNextMapClick = false;
       function openMaps(url) {
         if (!url) return;
         window.location.href = url;
@@ -694,7 +697,6 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
           .addTo(map)
           .bindPopup(popupContent)
           .on('click', function() {
-            suppressNextMapClick = true;
             openMaps(branch.mapsUrl || googleMapsUrl);
           });
 
@@ -704,14 +706,6 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
       if (bounds.length > 1) {
         map.fitBounds(bounds, { padding: [24, 24] });
       }
-
-      map.on('click', function() {
-        if (suppressNextMapClick) {
-          suppressNextMapClick = false;
-          return;
-        }
-        openMaps(googleMapsUrl);
-      });
     })();
   </script>` : ''}
 </body>
