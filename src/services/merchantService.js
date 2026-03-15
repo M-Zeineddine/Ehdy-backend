@@ -50,7 +50,7 @@ async function listMerchants({ category_id, search, country_code, page, limit, i
   const result = await query(
     `SELECT m.id, m.name, m.slug, m.description, m.logo_url, m.banner_image_url,
             m.category_id, c.name as category_name, c.slug as category_slug,
-            m.country_code, m.city, m.address, m.latitude, m.longitude,
+            m.country_code,
             m.contact_email, m.contact_phone, m.is_active, m.is_verified,
             m.rating, m.review_count, m.website_url, m.created_at
      FROM merchants m
@@ -79,7 +79,7 @@ async function getMerchantById(merchantId) {
   const result = await query(
     `SELECT m.id, m.name, m.slug, m.description, m.logo_url, m.banner_image_url,
             m.category_id, c.name as category_name, c.slug as category_slug,
-            m.country_code, m.city, m.address, m.latitude, m.longitude,
+            m.country_code,
             m.contact_email, m.contact_phone, m.is_active, m.is_verified,
             m.rating, m.review_count, m.website_url, m.created_at
      FROM merchants m
