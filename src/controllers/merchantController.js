@@ -27,6 +27,11 @@ const listMerchants = async (req, res, next) => {
 const getMerchant = async (req, res, next) => {
   try {
     const merchant = await merchantService.getMerchantById(req.params.id);
+    // Record visit inline — no extra round-trip needed from the client.
+    // Truly fire-and-forget: DB errors must NOT fail this request.
+    if (req.user) {
+      merchantService.recordVisit(req.params.id, req.user.id).catch(() => {});
+    }
     return successResponse(res, { merchant: sanitizeMerchant(merchant) });
   } catch (err) {
     return next(err);
@@ -52,4 +57,14 @@ const listMerchantItems = async (req, res, next) => {
   }
 };
 
-module.exports = { listMerchants, getMerchant, listCategories, listMerchantItems };
+const getRecentlyViewed = async (req, res, next) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+    const merchants = await merchantService.getRecentlyViewed(req.user.id, limit);
+    return successResponse(res, { recently_viewed: merchants });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = { listMerchants, getMerchant, listCategories, listMerchantItems, getRecentlyViewed };

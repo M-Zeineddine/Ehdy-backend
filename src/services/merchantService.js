@@ -164,10 +164,108 @@ async function getMerchantForPortal(merchantId) {
   return result.rows[0];
 }
 
+/**
+ * Record a merchant page visit for an authenticated user.
+ * Writes to two tables:
+ *   - merchant_visits: append-only event log (used by analytics)
+ *   - user_merchant_last_visit: upserted (used by recently-viewed)
+ * Fire-and-forget — callers must not propagate errors from this to the user.
+ */
+async function recordVisit(merchantId, userId) {
+  await Promise.all([
+    query(
+      'INSERT INTO merchant_visits (merchant_id, user_id) VALUES ($1, $2)',
+      [merchantId, userId]
+    ),
+    query(
+      `INSERT INTO user_merchant_last_visit (user_id, merchant_id, last_visited_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (user_id, merchant_id) DO UPDATE SET last_visited_at = NOW()`,
+      [userId, merchantId]
+    ),
+  ]);
+}
+
+/**
+ * Get recently visited distinct merchants for a user.
+ * Reads from user_merchant_last_visit (one row per user+merchant pair) —
+ * a simple index scan regardless of how large merchant_visits grows.
+ */
+async function getRecentlyViewed(userId, limit = 10) {
+  const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 10), 20);
+  const result = await query(
+    `SELECT
+       ulv.merchant_id     AS id,
+       m.name,
+       m.slug,
+       m.logo_url,
+       m.banner_image_url,
+       m.is_verified,
+       m.is_featured,
+       m.rating,
+       m.review_count,
+       c.name AS category_name,
+       c.slug AS category_slug,
+       ulv.last_visited_at AS visited_at
+     FROM user_merchant_last_visit ulv
+     JOIN merchants  m ON m.id  = ulv.merchant_id
+     JOIN categories c ON c.id  = m.category_id
+     WHERE ulv.user_id     = $1
+       AND m.is_active   = TRUE
+       AND m.deleted_at IS NULL
+     ORDER BY ulv.last_visited_at DESC
+     LIMIT $2`,
+    [userId, safeLimit]
+  );
+  return result.rows;
+}
+
+/**
+ * Visit analytics for a merchant (used by admin CMS).
+ * Returns total + unique visitor counts plus a daily breakdown.
+ */
+async function getVisitAnalytics(merchantId, days = 30) {
+  const safeDays = Math.min(Math.max(1, parseInt(days, 10) || 30), 365);
+
+  const [totalsResult, dailyResult] = await Promise.all([
+    query(
+      `SELECT
+         COUNT(*)                AS total_visits,
+         COUNT(DISTINCT user_id) AS unique_visitors
+       FROM merchant_visits
+       WHERE merchant_id = $1
+         AND visited_at >= NOW() - ($2::int * INTERVAL '1 day')`,
+      [merchantId, safeDays]
+    ),
+    query(
+      `SELECT
+         DATE(visited_at)        AS date,
+         COUNT(*)                AS total,
+         COUNT(DISTINCT user_id) AS unique
+       FROM merchant_visits
+       WHERE merchant_id = $1
+         AND visited_at >= NOW() - ($2::int * INTERVAL '1 day')
+       GROUP BY DATE(visited_at)
+       ORDER BY date ASC`,
+      [merchantId, safeDays]
+    ),
+  ]);
+
+  return {
+    period_days: safeDays,
+    total_visits: parseInt(totalsResult.rows[0].total_visits, 10),
+    unique_visitors: parseInt(totalsResult.rows[0].unique_visitors, 10),
+    daily_breakdown: dailyResult.rows,
+  };
+}
+
 module.exports = {
   listMerchants,
   getMerchantById,
   listMerchantItems,
   listCategories,
   getMerchantForPortal,
+  recordVisit,
+  getRecentlyViewed,
+  getVisitAnalytics,
 };

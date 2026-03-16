@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
+const { getVisitAnalytics } = require('../services/merchantService');
 const { authenticateAdmin } = require('../middleware/auth');
 
 // ─── Admin Login ───────────────────────────────────────────────────────────────
@@ -350,6 +351,17 @@ router.get('/merchants/:id', async (req, res, next) => {
         recent_redemptions: redemptionsResult.rows,
       },
     });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get('/merchants/:id/analytics', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const days = req.query.period ? parseInt(req.query.period) : 30;
+    const analytics = await getVisitAnalytics(id, days);
+    return res.json({ success: true, data: { merchant_id: id, ...analytics } });
   } catch (err) {
     return next(err);
   }

@@ -2,7 +2,7 @@
 
 const router = require('express').Router();
 const merchantController = require('../controllers/merchantController');
-const { optionalAuthenticate } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate } = require('../middleware/auth');
 const { paginationValidation } = require('../utils/validators');
 const { validate } = require('../middleware/validation');
 
@@ -18,6 +18,7 @@ const { validate } = require('../middleware/validation');
  */
 router.get('/categories', merchantController.listCategories);
 router.get('/items', merchantController.listMerchantItems);
+router.get('/recently-viewed', authenticate, merchantController.getRecentlyViewed);
 
 /**
  * @swagger
