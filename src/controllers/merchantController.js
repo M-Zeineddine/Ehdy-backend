@@ -27,12 +27,16 @@ const listMerchants = async (req, res, next) => {
 const getMerchant = async (req, res, next) => {
   try {
     const merchant = await merchantService.getMerchantById(req.params.id);
-    // Record visit inline — no extra round-trip needed from the client.
-    // Truly fire-and-forget: DB errors must NOT fail this request.
-    if (req.user) {
-      merchantService.recordVisit(req.params.id, req.user.id).catch(() => {});
-    }
     return successResponse(res, { merchant: sanitizeMerchant(merchant) });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const recordVisit = async (req, res, next) => {
+  try {
+    merchantService.recordVisit(req.params.id, req.user.id).catch(() => {});
+    return res.status(204).send();
   } catch (err) {
     return next(err);
   }
@@ -67,4 +71,4 @@ const getRecentlyViewed = async (req, res, next) => {
   }
 };
 
-module.exports = { listMerchants, getMerchant, listCategories, listMerchantItems, getRecentlyViewed };
+module.exports = { listMerchants, getMerchant, listCategories, listMerchantItems, getRecentlyViewed, recordVisit };

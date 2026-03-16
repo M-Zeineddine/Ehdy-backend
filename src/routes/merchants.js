@@ -91,5 +91,6 @@ router.get('/', optionalAuthenticate, paginationValidation, validate, merchantCo
  *         description: Merchant not found
  */
 router.get('/:id', optionalAuthenticate, merchantController.getMerchant);
+router.post('/:id/visit', authenticate, merchantController.recordVisit);
 
 module.exports = router;
