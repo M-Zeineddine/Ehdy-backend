@@ -59,9 +59,9 @@ const listMerchantItems = async (req, res, next) => {
 
 const getRecentlyViewed = async (req, res, next) => {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 10;
     const merchants = await merchantService.getRecentlyViewed(req.user.id, limit);
-    return successResponse(res, { recently_viewed: merchants });
+    return successResponse(res, { recently_viewed: merchants.map(sanitizeMerchant) });
   } catch (err) {
     return next(err);
   }

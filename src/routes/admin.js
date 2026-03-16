@@ -359,7 +359,16 @@ router.get('/merchants/:id', async (req, res, next) => {
 router.get('/merchants/:id/analytics', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const days = req.query.period ? parseInt(req.query.period) : 30;
+
+    const merchantExists = await query(
+      'SELECT id FROM merchants WHERE id = $1 AND deleted_at IS NULL',
+      [id]
+    );
+    if (merchantExists.rows.length === 0) {
+      return next(new AppError('Merchant not found', 404, 'NOT_FOUND'));
+    }
+
+    const days = req.query.period ? parseInt(req.query.period, 10) : 30;
     const analytics = await getVisitAnalytics(id, days);
     return res.json({ success: true, data: { merchant_id: id, ...analytics } });
   } catch (err) {

@@ -223,6 +223,12 @@ async function getRecentlyViewed(userId, limit = 10) {
 /**
  * Visit analytics for a merchant (used by admin CMS).
  * Returns total + unique visitor counts plus a daily breakdown.
+ *
+ * Note on unique visitors:
+ *   - `unique_visitors` = distinct user_ids across the entire period (e.g. 50 people in 30 days)
+ *   - `daily_breakdown[n].unique` = distinct user_ids on that specific day
+ *   A user visiting on Monday AND Tuesday counts as 1 in the period total
+ *   but as 1+1 in the sum of daily uniques. These are intentionally different metrics.
  */
 async function getVisitAnalytics(merchantId, days = 30) {
   const safeDays = Math.min(Math.max(1, parseInt(days, 10) || 30), 365);
