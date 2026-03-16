@@ -281,7 +281,7 @@ router.get('/merchants', async (req, res, next) => {
     params.push(offset);
 
     const merchantsResult = await query(`
-      SELECT m.id, m.name, m.slug, m.logo_url, m.is_active, m.is_verified,
+      SELECT m.id, m.name, m.slug, m.logo_url, m.is_active, m.is_verified, m.is_featured,
              m.contact_email, m.contact_phone, m.rating, m.review_count,
              m.created_at, c.name as category_name,
              COUNT(DISTINCT mb.id) as branch_count,
@@ -574,16 +574,16 @@ router.get('/gifts', async (req, res, next) => {
 
     const giftsResult = await query(`
       SELECT gs.id, gs.sender_name, gs.recipient_name, gs.recipient_email,
-             gs.recipient_phone, gs.theme, gs.delivery_channel, gs.payment_status,
-             gs.is_claimed, gs.claimed_at, gs.sent_at, gs.scheduled_for,
+             gs.recipient_phone, gs.theme, gs.payment_status,
+             gs.is_claimed, gs.claimed_at, gs.sent_at,
              gs.expiration_date, gs.tap_charge_id,
              u.email as sender_user_email,
              m.name as merchant_name
       FROM gifts_sent gs
       LEFT JOIN users u ON u.id = gs.sender_user_id
       LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
-      LEFT JOIN gift_cards gc ON gc.id = gi.gift_card_id
-      LEFT JOIN merchants m ON m.id = gc.merchant_id
+      LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+      LEFT JOIN merchants m ON m.id = mi.merchant_id
       ${whereClause}
       ORDER BY gs.sent_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
@@ -707,12 +707,7 @@ router.get('/analytics', async (req, res, next) => {
         WHERE sent_at >= NOW() - INTERVAL '${days} days' AND payment_status = 'paid'
         GROUP BY theme ORDER BY count DESC
       `),
-      query(`
-        SELECT delivery_channel, COUNT(*) as count
-        FROM gifts_sent
-        WHERE sent_at >= NOW() - INTERVAL '${days} days' AND payment_status = 'paid'
-        GROUP BY delivery_channel
-      `),
+      Promise.resolve({ rows: [] }),
       query(`
         SELECT
           COUNT(*) FILTER (WHERE is_redeemed = TRUE) as redeemed,
