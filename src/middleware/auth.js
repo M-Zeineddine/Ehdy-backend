@@ -167,7 +167,7 @@ const authenticateAdmin = async (req, res, next) => {
       `SELECT id, email, first_name, last_name, role, is_active
        FROM admin_users
        WHERE id = $1`,
-      [decoded.adminUserId]
+      [decoded.adminId]
     );
 
     if (result.rows.length === 0) {

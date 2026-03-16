@@ -11,8 +11,9 @@ export interface AdminUser {
 
 export async function login(email: string, password: string): Promise<void> {
   const { data } = await api.post('/v1/admin/login', { email, password });
-  Cookies.set('kado_admin_token', data.token, { expires: 7 });
-  localStorage.setItem('kado_admin', JSON.stringify(data.admin));
+  const { token, admin } = data.data;
+  Cookies.set('kado_admin_token', token, { expires: 7 });
+  localStorage.setItem('kado_admin', JSON.stringify(admin));
 }
 
 export function logout(): void {
