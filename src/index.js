@@ -3,7 +3,6 @@
 require('dotenv').config();
 
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
 const helmet = require('helmet');
 const swaggerUi = require('swagger-ui-express');
@@ -147,24 +146,7 @@ app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/webhooks', webhookRoutes);
 app.use('/v1/admin', adminRoutes);
 app.use('/gift', giftPageRoutes);
-
-// ─── CMS Static Files ─────────────────────────────────────────────────────────
-const cmsOut = path.join(__dirname, '../cms/out');
-if (fs.existsSync(cmsOut)) {
-  app.use('/cms', express.static(cmsOut));
-  app.get('/cms/*', (req, res) => {
-    const subPath = req.path.replace(/^\/cms/, '') || '/';
-    const candidates = [
-      path.join(cmsOut, subPath, 'index.html'),
-      path.join(cmsOut, subPath.replace(/\/$/, ''), 'index.html'),
-      path.join(cmsOut, '404.html'),
-      path.join(cmsOut, 'index.html'),
-    ];
-    const file = candidates.find(f => fs.existsSync(f));
-    if (file) res.sendFile(file);
-    else res.status(404).send('CMS not built yet. Run: cd cms && npm run build');
-  });
-}
+app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 
 // ─── 404 and Error Handlers ───────────────────────────────────────────────────
 app.use(notFoundHandler);

@@ -9,11 +9,7 @@
     "test": "jest --runInBand",
     "migrate:up": "node src/migrations/run.js up",
     "seed": "node src/seeds/seed.js",
-    "lint": "eslint src/ --ext .js",
-    "cms:install": "cd cms && npm install",
-    "cms:build": "cd cms && npm run build",
-    "cms:dev": "cd cms && npm run dev",
-    "build": "cd cms && npm install && npm run build"
+    "lint": "eslint src/ --ext .js"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.0",
