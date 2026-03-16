@@ -148,7 +148,7 @@ const authenticateMerchant = async (req, res, next) => {
 };
 
 /**
- * Authenticate admin JWT. Attaches req.admin on success.
+ * Authenticate admin user JWT. Attaches req.admin on success.
  */
 const authenticateAdmin = async (req, res, next) => {
   try {
@@ -164,23 +164,16 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     const result = await query(
-      `SELECT id, email, first_name, last_name, role, is_active
-       FROM admin_users
-       WHERE id = $1`,
-      [decoded.adminUserId]
+      'SELECT id, email, first_name, last_name, role FROM admin_users WHERE id = $1 AND is_active = TRUE',
+      [decoded.adminId]
     );
 
     if (result.rows.length === 0) {
-      return next(new AppError('Admin user not found', 401, 'USER_NOT_FOUND'));
+      return next(new AppError('Admin user not found or inactive', 401, 'USER_NOT_FOUND'));
     }
 
-    const adminUser = result.rows[0];
-    if (!adminUser.is_active) {
-      return next(new AppError('Admin account is not active', 403, 'ACCOUNT_INACTIVE'));
-    }
-
-    req.admin = adminUser;
-    req.adminUserId = adminUser.id;
+    req.admin = result.rows[0];
+    req.adminId = decoded.adminId;
     return next();
   } catch (err) {
     logger.warn('Admin authentication failed', { error: err.message });

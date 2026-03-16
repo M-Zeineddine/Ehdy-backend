@@ -2,8 +2,9 @@
 
 require('dotenv').config();
 
-const express = require('express');
 const path = require('path');
+const fs   = require('fs');
+const express = require('express');
 const helmet = require('helmet');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
@@ -144,9 +145,32 @@ app.use('/v1/notifications', notificationRoutes);
 app.use('/v1/merchant', merchantPortalRoutes);
 app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/webhooks', webhookRoutes);
-app.use('/v1/admin', adminRoutes);
 app.use('/gift', giftPageRoutes);
-app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
+app.use('/v1/admin', adminRoutes);
+
+// ─── CMS Static Files ─────────────────────────────────────────────────────────
+const cmsOut = path.join(__dirname, '../cms/out');
+if (fs.existsSync(cmsOut)) {
+  app.use('/cms', express.static(cmsOut));
+  // SPA fallback: serve the correct page HTML for any /cms/* path
+  app.get('/cms/*', (req, res) => {
+    // Strip /cms prefix and try to find a matching exported page
+    const subPath = req.path.replace(/^\/cms/, '') || '/';
+    const candidates = [
+      path.join(cmsOut, subPath, 'index.html'),
+      path.join(cmsOut, subPath.replace(/\/$/, ''), 'index.html'),
+      path.join(cmsOut, '404.html'),
+      path.join(cmsOut, 'index.html'),
+    ];
+    const file = candidates.find(f => fs.existsSync(f));
+    if (file) res.sendFile(file);
+    else res.status(404).send('CMS not built yet. Run: cd cms && npm run build');
+  });
+} else {
+  app.get('/cms*', (_req, res) => {
+    res.status(503).send('CMS not built yet. Run: cd cms && npm run build');
+  });
+}
 
 // ─── 404 and Error Handlers ───────────────────────────────────────────────────
 app.use(notFoundHandler);
@@ -240,7 +264,7 @@ async function startServer() {
 }
 
 // Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, _promise) => {
+process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Promise Rejection', {
     reason: reason instanceof Error ? reason.message : reason,
     stack: reason instanceof Error ? reason.stack : undefined,

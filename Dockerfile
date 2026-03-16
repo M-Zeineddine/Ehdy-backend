@@ -1,12 +1,22 @@
+FROM node:18-alpine AS cms-builder
+
+WORKDIR /app/cms
+COPY cms/package*.json ./
+RUN npm ci
+COPY cms/ ./
+RUN npm run build
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 FROM node:18-alpine
 
 WORKDIR /app
 
 COPY package*.json ./
-
 RUN npm ci --only=production
 
 COPY src/ ./src/
+COPY --from=cms-builder /app/cms/out ./cms/out
 
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodeuser -u 1001 && \
