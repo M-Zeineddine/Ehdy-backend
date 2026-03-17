@@ -661,7 +661,7 @@ async function initiateGiftPayment(userId, {
     if (!r.rows.length) throw new AppError('Store credit preset not found', 404, 'ITEM_NOT_FOUND');
     amount = parseFloat(r.rows[0].amount);
     currency = r.rows[0].currency_code;
-  } else if (custom_credit_amount && custom_credit_merchant_id) {
+  } else if (custom_credit_amount != null && custom_credit_merchant_id) {
     amount = parseFloat(custom_credit_amount);
     if (isNaN(amount) || amount <= 0) throw new AppError('Invalid custom credit amount', 400, 'INVALID_AMOUNT');
     if (amount > 10000) throw new AppError('Custom credit amount exceeds maximum of 10,000', 400, 'AMOUNT_TOO_LARGE');

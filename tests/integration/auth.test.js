@@ -56,11 +56,18 @@ beforeAll(async () => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
   }
 
+  // Prevent src/index.js from calling process.exit(1) when DB is unavailable
+  const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
+
   try {
     app = require('../../src/index');
     pool = require('../../src/config/database');
+    // Wait briefly for async server startup to complete (or fail)
+    await new Promise(resolve => setTimeout(resolve, 500));
   } catch (err) {
     console.warn('Could not load app - integration tests require database:', err.message);
+  } finally {
+    exitSpy.mockRestore();
   }
 }, 30000);
 
