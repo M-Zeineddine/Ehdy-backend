@@ -45,7 +45,7 @@ const merchantService = require('../../src/services/merchantService');
 const { query } = require('../../src/utils/database');
 const { merchants } = require('../helpers/factories');
 
-const SECRET = 'test-jwt-secret-kado-2024-unit';
+const SECRET = 'test-jwt-secret-ehdy-2024-unit';
 const USER_ID = 'test-user-uuid-123';
 
 function buildApp() {

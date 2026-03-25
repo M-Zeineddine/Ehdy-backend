@@ -49,7 +49,7 @@ const { buildPagination } = require('../../src/utils/database');
 const { sanitizeMerchant, sanitizeUser } = require('../../src/utils/formatters');
 const merchantServiceReal = jest.requireActual('../../src/services/merchantService');
 
-const SECRET = 'test-jwt-secret-kado-2024-unit';
+const SECRET = 'test-jwt-secret-ehdy-2024-unit';
 const USER_ID = 'security-test-user';
 
 function buildApp() {

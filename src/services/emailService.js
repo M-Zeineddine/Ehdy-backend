@@ -28,7 +28,7 @@ async function sendEmail({ to, subject, html }) {
 async function sendVerificationEmail(email, code) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h1 style="color: #333; text-align: center;">Welcome to Kado! 🎁</h1>
+      <h1 style="color: #333; text-align: center;">Welcome to Ehdy! 🎁</h1>
       <p style="color: #555; font-size: 16px;">Please verify your email address to get started.</p>
       <div style="background: #f4f4f4; border-radius: 8px; padding: 30px; text-align: center; margin: 20px 0;">
         <p style="color: #333; font-size: 14px; margin-bottom: 10px;">Your verification code is:</p>
@@ -36,14 +36,14 @@ async function sendVerificationEmail(email, code) {
         <p style="color: #888; font-size: 12px; margin-top: 10px;">This code expires in 15 minutes.</p>
       </div>
       <p style="color: #888; font-size: 14px; text-align: center;">
-        If you did not create a Kado account, you can safely ignore this email.
+        If you did not create a Ehdy account, you can safely ignore this email.
       </p>
     </div>
   `;
 
   await sendEmail({
     to: email,
-    subject: 'Verify your Kado email address',
+    subject: 'Verify your Ehdy email address',
     html,
   });
 }
@@ -52,14 +52,14 @@ async function sendVerificationEmail(email, code) {
  * Send password reset email with link.
  */
 async function sendPasswordResetEmail(email, firstName, resetToken) {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://kado.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://ehdy.app';
   const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <h1 style="color: #333; text-align: center;">Password Reset</h1>
       <p style="color: #555; font-size: 16px;">Hi ${firstName || 'there'},</p>
-      <p style="color: #555; font-size: 16px;">You requested to reset your Kado password. Click the button below to set a new password:</p>
+      <p style="color: #555; font-size: 16px;">You requested to reset your Ehdy password. Click the button below to set a new password:</p>
       <div style="text-align: center; margin: 30px 0;">
         <a href="${resetLink}"
            style="background: #6B46C1; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">
@@ -77,7 +77,7 @@ async function sendPasswordResetEmail(email, firstName, resetToken) {
 
   await sendEmail({
     to: email,
-    subject: 'Reset your Kado password',
+    subject: 'Reset your Ehdy password',
     html,
   });
 }
@@ -94,7 +94,7 @@ async function sendGiftReceivedEmail({
   shareLink,
   theme,
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://kado.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://ehdy.app';
   const claimUrl = `${frontendUrl}/claim/${shareLink}`;
 
   const themeEmojis = {
@@ -113,7 +113,7 @@ async function sendGiftReceivedEmail({
         <h1 style="color: #333; text-align: center; font-size: 28px;">${emoji} You Got a Gift!</h1>
         <p style="color: #555; font-size: 16px;">Hi ${recipientName || 'there'},</p>
         <p style="color: #555; font-size: 16px;">
-          <strong>${senderName}</strong> sent you a gift from <strong>${merchantName}</strong> via Kado!
+          <strong>${senderName}</strong> sent you a gift from <strong>${merchantName}</strong> via Ehdy!
         </p>
         ${personalMessage ? `
         <div style="background: #f9f5ff; border-left: 4px solid #6B46C1; padding: 15px; margin: 20px 0; border-radius: 4px;">
@@ -136,7 +136,7 @@ async function sendGiftReceivedEmail({
 
   await sendEmail({
     to: recipientEmail,
-    subject: `${senderName} sent you a gift on Kado! ${emoji}`,
+    subject: `${senderName} sent you a gift on Ehdy! ${emoji}`,
     html,
   });
 }
@@ -178,13 +178,13 @@ async function sendPurchaseConfirmationEmail({ email, firstName, purchase, items
           </tr>
         </tfoot>
       </table>
-      <p style="color: #888; font-size: 14px;">Your gift(s) have been added to your Kado wallet.</p>
+      <p style="color: #888; font-size: 14px;">Your gift(s) have been added to your Ehdy wallet.</p>
     </div>
   `;
 
   await sendEmail({
     to: email,
-    subject: 'Your Kado purchase confirmation',
+    subject: 'Your Ehdy purchase confirmation',
     html,
   });
 }
@@ -200,7 +200,7 @@ async function sendPaymentFailedEmail({ email, firstName, amount, currency, reas
       <p style="color: #555;">Unfortunately, your payment of <strong>${currency} ${amount}</strong> could not be processed.</p>
       ${reason ? `<p style="color: #888;">Reason: ${reason}</p>` : ''}
       <p style="color: #555;">Please check your payment details and try again.</p>
-      <a href="${process.env.FRONTEND_URL || 'https://kado.app'}"
+      <a href="${process.env.FRONTEND_URL || 'https://ehdy.app'}"
          style="background: #6B46C1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; margin-top: 16px;">
         Try Again
       </a>
@@ -209,7 +209,7 @@ async function sendPaymentFailedEmail({ email, firstName, amount, currency, reas
 
   await sendEmail({
     to: email,
-    subject: 'Payment failed on Kado',
+    subject: 'Payment failed on Ehdy',
     html,
   });
 }

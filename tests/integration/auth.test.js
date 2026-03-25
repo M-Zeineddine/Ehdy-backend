@@ -13,7 +13,7 @@ const request = require('supertest');
 // Mock external services before requiring app
 jest.mock('../../src/config/email', () => ({
   sgMail: { send: jest.fn().mockResolvedValue([{ statusCode: 202 }]) },
-  emailConfig: { fromEmail: 'test@kado.app', fromName: 'Kado Test' },
+  emailConfig: { fromEmail: 'test@ehdy.app', fromName: 'Ehdy Test' },
 }));
 
 jest.mock('../../src/config/sms', () => ({

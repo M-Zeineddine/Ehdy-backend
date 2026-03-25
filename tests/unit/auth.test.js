@@ -14,7 +14,7 @@ const jwt = require('jsonwebtoken');
 const { query } = require('../../src/utils/database');
 const { authenticate, optionalAuthenticate, authenticateAdmin } = require('../../src/middleware/auth');
 
-const SECRET = 'test-jwt-secret-kado-2024-unit';
+const SECRET = 'test-jwt-secret-ehdy-2024-unit';
 
 function makeToken(payload, secret = SECRET, options = {}) {
   return jwt.sign(payload, secret, { expiresIn: '1h', ...options });
@@ -199,7 +199,7 @@ describe('authenticateAdmin', () => {
     const token = makeToken({ adminId, type: 'admin' });
     req.headers.authorization = `Bearer ${token}`;
     query.mockResolvedValueOnce({
-      rows: [{ id: adminId, email: 'admin@kado.app', role: 'super_admin' }],
+      rows: [{ id: adminId, email: 'admin@ehdy.app', role: 'super_admin' }],
     });
 
     await authenticateAdmin(req, res, next);
