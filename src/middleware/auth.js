@@ -115,6 +115,7 @@ const authenticateMerchant = async (req, res, next) => {
     // Verify merchant user still exists and is active
     const result = await query(
       `SELECT mu.id, mu.merchant_id, mu.email, mu.first_name, mu.last_name,
+              mu.role, mu.branch_id,
               m.name as merchant_name, m.is_active as merchant_is_active
        FROM merchant_users mu
        JOIN merchants m ON m.id = mu.merchant_id
@@ -187,4 +188,19 @@ const authenticateAdmin = async (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, optionalAuthenticate, authenticateMerchant, authenticateAdmin };
+/**
+ * Require the authenticated merchant user to have the 'owner' role.
+ * Must be used AFTER authenticateMerchant.
+ * Role is sourced from req.merchant (DB-fetched) — never from the JWT payload.
+ */
+const requireOwnerRole = (req, _res, next) => {
+  if (!req.merchant) {
+    return next(new AppError('Not authenticated', 401, 'NOT_AUTHENTICATED'));
+  }
+  if (req.merchant.role !== 'owner') {
+    return next(new AppError('Owner access required', 403, 'FORBIDDEN'));
+  }
+  return next();
+};
+
+module.exports = { authenticate, optionalAuthenticate, authenticateMerchant, requireOwnerRole, authenticateAdmin };

@@ -14,7 +14,7 @@ const BCRYPT_ROUNDS = 12;
 async function merchantLogin({ email, password }) {
   const result = await query(
     `SELECT mu.id, mu.merchant_id, mu.email, mu.password_hash,
-            mu.first_name, mu.last_name, mu.is_active,
+            mu.first_name, mu.last_name, mu.is_active, mu.role, mu.branch_id,
             m.name as merchant_name, m.is_active as merchant_is_active
      FROM merchant_users mu
      JOIN merchants m ON m.id = mu.merchant_id
@@ -45,6 +45,8 @@ async function merchantLogin({ email, password }) {
     {
       merchantUserId: merchantUser.id,
       merchantId: merchantUser.merchant_id,
+      role: merchantUser.role,
+      branchId: merchantUser.branch_id,
       type: 'merchant',
     },
     process.env.JWT_SECRET,
@@ -54,6 +56,7 @@ async function merchantLogin({ email, password }) {
   logger.info('Merchant user logged in', {
     merchantUserId: merchantUser.id,
     merchantId: merchantUser.merchant_id,
+    role: merchantUser.role,
   });
 
   return {
@@ -65,6 +68,8 @@ async function merchantLogin({ email, password }) {
       last_name: merchantUser.last_name,
       merchant_id: merchantUser.merchant_id,
       merchant_name: merchantUser.merchant_name,
+      role: merchantUser.role,
+      branch_id: merchantUser.branch_id,
     },
   };
 }
