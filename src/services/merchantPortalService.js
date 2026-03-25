@@ -82,26 +82,34 @@ async function getMerchantDashboard(merchantId) {
   const startOfDay = `${today} 00:00:00`;
   const endOfDay = `${today} 23:59:59`;
 
+  // Helper: filter gift_instances by merchant via all three FK paths
+  const merchantFilter = `COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) = $3`;
+  const merchantJoins = `
+    LEFT JOIN merchant_items       mi  ON mi.id  = gi.merchant_item_id
+    LEFT JOIN store_credit_presets scp ON scp.id = gi.store_credit_preset_id
+  `;
+
   // Today's stats
   const todayStats = await query(
     `SELECT
-       COUNT(*) FILTER (WHERE gi.redeemed_at BETWEEN $1 AND $2) as today_redemptions,
-       SUM(gi.redeemed_amount) FILTER (WHERE gi.redeemed_at BETWEEN $1 AND $2) as today_revenue,
-       COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE AND gi.expiration_date >= CURRENT_DATE) as active_codes
+       COUNT(*) FILTER (WHERE gi.redeemed_at BETWEEN $1 AND $2) AS today_redemptions,
+       SUM(gi.redeemed_amount) FILTER (WHERE gi.redeemed_at BETWEEN $1 AND $2) AS today_revenue,
+       COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE
+         AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)) AS active_codes
      FROM gift_instances gi
-     JOIN gift_cards gc ON gc.id = gi.gift_card_id
-     WHERE gc.merchant_id = $3`,
+     ${merchantJoins}
+     WHERE ${merchantFilter}`,
     [startOfDay, endOfDay, merchantId]
   );
 
   // This month stats
   const monthStats = await query(
     `SELECT
-       COUNT(*) as month_redemptions,
-       SUM(gi.redeemed_amount) as month_revenue
+       COUNT(*) AS month_redemptions,
+       SUM(gi.redeemed_amount) AS month_revenue
      FROM gift_instances gi
-     JOIN gift_cards gc ON gc.id = gi.gift_card_id
-     WHERE gc.merchant_id = $1
+     ${merchantJoins}
+     WHERE COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) = $1
        AND gi.is_redeemed = TRUE
        AND DATE_TRUNC('month', gi.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)`,
     [merchantId]
@@ -110,26 +118,19 @@ async function getMerchantDashboard(merchantId) {
   // Recent redemptions
   const recentRedemptions = await query(
     `SELECT gi.redemption_code, gi.redeemed_at, gi.redeemed_amount, gi.currency_code,
-            gc.name as gift_card_name, gc.type
+            CASE
+              WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
+              WHEN gi.store_credit_preset_id IS NOT NULL
+                THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
+              ELSE CONCAT(gi.custom_credit_amount::text, ' ', gi.currency_code, ' Store Credit')
+            END AS gift_card_name,
+            CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type
      FROM gift_instances gi
-     JOIN gift_cards gc ON gc.id = gi.gift_card_id
-     WHERE gc.merchant_id = $1 AND gi.is_redeemed = TRUE
+     ${merchantJoins}
+     WHERE COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) = $1
+       AND gi.is_redeemed = TRUE
      ORDER BY gi.redeemed_at DESC
      LIMIT 10`,
-    [merchantId]
-  );
-
-  // Gift card breakdown
-  const giftCardStats = await query(
-    `SELECT gc.id, gc.name, gc.type,
-            COUNT(*) FILTER (WHERE gi.is_redeemed = TRUE) as times_redeemed,
-            COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE) as active_instances,
-            SUM(gi.redeemed_amount) as total_redeemed_value
-     FROM gift_cards gc
-     LEFT JOIN gift_instances gi ON gi.gift_card_id = gc.id
-     WHERE gc.merchant_id = $1 AND gc.is_active = TRUE
-     GROUP BY gc.id, gc.name, gc.type
-     ORDER BY times_redeemed DESC`,
     [merchantId]
   );
 
@@ -140,14 +141,13 @@ async function getMerchantDashboard(merchantId) {
     today: {
       redemptions: parseInt(stats.today_redemptions, 10) || 0,
       revenue: parseFloat(stats.today_revenue) || 0,
-      active_codes: parseInt(stats.active_codes, 10) || 0,
     },
-    this_month: {
+    month: {
       redemptions: parseInt(month.month_redemptions, 10) || 0,
       revenue: parseFloat(month.month_revenue) || 0,
     },
+    active_codes: parseInt(stats.active_codes, 10) || 0,
     recent_redemptions: recentRedemptions.rows,
-    gift_card_breakdown: giftCardStats.rows,
   };
 }
 
