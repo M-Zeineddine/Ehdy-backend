@@ -4,7 +4,7 @@ require('dotenv').config();
 const poolConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT, 10) || 5432,
-  database: process.env.DB_NAME || 'kado_db',
+  database: process.env.DB_NAME || 'ehdy_db',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'password',
   max: parseInt(process.env.DB_MAX_CONNECTIONS, 10) || 5,

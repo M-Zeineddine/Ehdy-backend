@@ -326,7 +326,7 @@ async function _createGiftInstanceAndSend(client, { userId, giftCard, draft, str
       userId: recipientUserId,
       type: 'gift_received',
       title: 'You received a gift!',
-      message: `${senderName} sent you a gift on Kado!`,
+      message: `${senderName} sent you a gift on Ehdy!`,
       relatedEntityType: 'gift_sent',
       relatedEntityId: giftSent.id,
     });
@@ -717,13 +717,13 @@ async function initiateGiftPayment(userId, {
   // Build webhook + redirect URLs
   const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3000}`;
   const postUrl = `${backendUrl}/v1/webhooks/tap`;
-  const redirectUrl = `kado://payment/callback`;
+  const redirectUrl = `ehdy://payment/callback`;
 
   // Create Tap charge
   const charge = await createTapCharge({
     amount,
     currency,
-    metadata: { gift_sent_id: giftSentId, kado_user_id: userId },
+    metadata: { gift_sent_id: giftSentId, ehdy_user_id: userId },
     customer: { first_name: user.first_name || sender_name || 'Customer', email: user.email },
     redirectUrl,
     postUrl,

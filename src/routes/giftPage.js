@@ -147,7 +147,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>You have a gift from ${escapeHtml(senderName)}! 🎁</title>
   <meta property="og:title" content="You have a gift from ${escapeHtml(senderName)}!" />
-  <meta property="og:description" content="${escapeHtml(senderName)} sent you a gift via Kado." />
+  <meta property="og:description" content="${escapeHtml(senderName)} sent you a gift via Ehdy." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
@@ -602,7 +602,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
           </div>
           <div class="step-body">
             <h4>Visit any ${merchantName ? escapeHtml(merchantName) + ' branch' : 'participating branch'}</h4>
-            <p>Show this page or open Kado at the counter.</p>
+            <p>Show this page or open Ehdy at the counter.</p>
           </div>
         </div>
         <div class="step">
@@ -611,7 +611,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
             <div class="step-line"></div>
           </div>
           <div class="step-body">
-            <h4>Tell the staff you have a Kado gift</h4>
+            <h4>Tell the staff you have a Ehdy gift</h4>
             <p>Let them know what you'd like to redeem.</p>
           </div>
         </div>
@@ -643,9 +643,9 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
 
     <!-- CTA -->
     <div>
-      <a href="kadoapp://open-gift" class="cta-btn">Open in Kado App</a>
+      <a href="ehdyapp://open-gift" class="cta-btn">Open in Ehdy App</a>
 
-      <p class="footer">Powered by <a href="https://kado-backend.onrender.com">Kado</a></p>
+      <p class="footer">Powered by Ehdy</p>
     </div>
   </div>
 
@@ -718,7 +718,7 @@ function renderNotFound() {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gift not found — Kado</title>
+  <title>Gift not found — Ehdy</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {

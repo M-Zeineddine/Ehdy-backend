@@ -38,7 +38,7 @@ app.use(
   '/api/docs',
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec, {
-    customSiteTitle: 'Kado API Docs',
+    customSiteTitle: 'Ehdy API Docs',
     customCss: '.swagger-ui .topbar { background-color: #1a1a2e; }',
   })
 );
@@ -125,7 +125,7 @@ app.get('/test-email/:to', async (req, res) => {
   const { to } = req.params;
   try {
     const { sendEmail } = require('./services/emailService');
-    await sendEmail({ to, subject: 'Kado email test', html: '<h1>It works!</h1><p>Email delivery is configured correctly.</p>' });
+    await sendEmail({ to, subject: 'Ehdy email test', html: '<h1>It works!</h1><p>Email delivery is configured correctly.</p>' });
     res.json({ ok: true, message: `Test email sent to ${to}` });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -212,7 +212,7 @@ async function startServer() {
     }
 
     const server = app.listen(PORT, HOST, () => {
-      logger.info(`Kado API server started`, {
+      logger.info(`Ehdy API server started`, {
         port: PORT,
         host: HOST,
         environment: process.env.NODE_ENV || 'development',

@@ -62,9 +62,9 @@ async function sendGiftNotification({
   shareLink,
   channel = 'sms',
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://kado.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://ehdy.app';
   const claimUrl = `${frontendUrl}/claim/${shareLink}`;
-  const body = `Hi ${recipientName || 'there'}! ${senderName} sent you a gift on Kado! 🎁 Open: ${claimUrl}`;
+  const body = `Hi ${recipientName || 'there'}! ${senderName} sent you a gift on Ehdy! 🎁 Open: ${claimUrl}`;
 
   if (channel === 'whatsapp') {
     return sendWhatsApp(recipientPhone, body);
@@ -77,7 +77,7 @@ async function sendGiftNotification({
  * Send an OTP via SMS.
  */
 async function sendOTPSMS(phone, otp) {
-  const body = `Your Kado verification code is: ${otp}. Valid for 15 minutes.`;
+  const body = `Your Ehdy verification code is: ${otp}. Valid for 15 minutes.`;
   return sendSMS(phone, body);
 }
 

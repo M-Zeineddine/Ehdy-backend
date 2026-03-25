@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Kado CMS',
-  description: 'Kado Admin Control Panel',
+  title: 'Ehdy CMS',
+  description: 'Ehdy Admin Control Panel',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

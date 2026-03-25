@@ -9,7 +9,7 @@ require('dotenv').config();
  * @returns {Promise<string>} Base64 data URL
  */
 async function generateQRCode(redemptionCode) {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://kado.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://ehdy.app';
   const qrUrl = `${frontendUrl}/redeem/${redemptionCode}`;
   return await QRCode.toDataURL(qrUrl, {
     errorCorrectionLevel: 'H',
@@ -28,7 +28,7 @@ async function generateQRCode(redemptionCode) {
  * @returns {Promise<string>} SVG string
  */
 async function generateQRCodeSVG(redemptionCode) {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://kado.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://ehdy.app';
   const qrUrl = `${frontendUrl}/redeem/${redemptionCode}`;
   return await QRCode.toString(qrUrl, {
     type: 'svg',

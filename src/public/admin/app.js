@@ -1,5 +1,5 @@
 const state = {
-  token: localStorage.getItem('kado_admin_token') || '',
+  token: localStorage.getItem('ehdy_admin_token') || '',
   admin: null,
   dashboard: null,
   reference: { categories: [], merchants: [] },
@@ -758,7 +758,7 @@ async function refreshAll() {
 
 function persistToken(token) {
   state.token = token;
-  localStorage.setItem('kado_admin_token', token);
+  localStorage.setItem('ehdy_admin_token', token);
 }
 
 function resetPagination(target) {
@@ -794,7 +794,7 @@ async function handleLogin(event) {
   setAuthState(true);
   renderIdentity();
   await refreshAll();
-  showNotice('Signed in to Kado CMS.');
+  showNotice('Signed in to Ehdy CMS.');
 }
 
 async function handleMerchantSubmit(event) {
@@ -840,7 +840,7 @@ async function handleCreditSubmit(event) {
 }
 
 function logout() {
-  localStorage.removeItem('kado_admin_token');
+  localStorage.removeItem('ehdy_admin_token');
   state.token = '';
   state.admin = null;
   setAuthState(false);

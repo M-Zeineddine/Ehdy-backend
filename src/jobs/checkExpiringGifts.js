@@ -49,7 +49,7 @@ async function checkExpiringGifts() {
         // Send email notification
         await emailService.sendEmail({
           to: gift.email,
-          subject: `Your Kado gift expires in 7 days!`,
+          subject: `Your Ehdy gift expires in 7 days!`,
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
               <h1 style="color: #e53e3e;">⏰ Gift Expiring Soon!</h1>
@@ -57,7 +57,7 @@ async function checkExpiringGifts() {
               <p>Your <strong>${gift.gift_card_name}</strong> from <strong>${gift.merchant_name}</strong> expires on <strong>${gift.expiration_date}</strong>.</p>
               ${gift.current_balance ? `<p>Remaining balance: <strong>${gift.currency_code} ${gift.current_balance}</strong></p>` : ''}
               <p>Don't let it go to waste - use it before it expires!</p>
-              <a href="${process.env.FRONTEND_URL || 'https://kado.app'}/wallet"
+              <a href="${process.env.FRONTEND_URL || 'https://ehdy.app'}/wallet"
                  style="background: #6B46C1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block; margin-top: 16px;">
                 View My Wallet
               </a>

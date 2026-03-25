@@ -27,9 +27,9 @@ async function createTapCharge({ amount, currency = 'USD', metadata = {}, custom
     customer_initiated: true,
     threeDSecure: true,
     save_card: false,
-    description: 'Kado Gift Purchase',
+    description: 'Ehdy Gift Purchase',
     metadata,
-    reference: { transaction: `kado_${metadata.gift_sent_id || Date.now()}` },
+    reference: { transaction: `ehdy_${metadata.gift_sent_id || Date.now()}` },
     receipt: { email: false, sms: false },
     customer: {
       first_name: customer.first_name || 'Customer',

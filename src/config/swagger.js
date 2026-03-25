@@ -6,13 +6,13 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Kado API',
+      title: 'Ehdy API',
       version: '1.0.0',
       description:
-        'Kado gifting platform API — send store credit and gift items to anyone, redeemable via QR code.',
+        'Ehdy gifting platform API — send store credit and gift items to anyone, redeemable via QR code.',
       contact: {
-        name: 'Kado Team',
-        email: 'dev@kado.app',
+        name: 'Ehdy Team',
+        email: 'dev@ehdy.app',
       },
     },
     servers: [
@@ -21,7 +21,7 @@ const options = {
         description: 'Local development',
       },
       {
-        url: 'https://api.kado.app/v1',
+        url: 'https://api.ehdy.app/v1',
         description: 'Production',
       },
     ],

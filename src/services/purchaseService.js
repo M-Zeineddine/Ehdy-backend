@@ -54,7 +54,7 @@ async function createPurchase(userId, { items, currency_code = 'USD', payment_me
     amount: totalAmount,
     currency: currency_code,
     metadata: {
-      kado_user_id: userId,
+      ehdy_user_id: userId,
       item_count: items.length,
     },
     customerId: user.stripe_customer_id,

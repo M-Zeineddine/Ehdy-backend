@@ -28,7 +28,7 @@ export default function Sidebar() {
       <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-800">
         <div className="w-9 h-9 bg-brand-600 rounded-lg flex items-center justify-center text-white text-lg">🎁</div>
         <div>
-          <p className="font-bold text-white text-sm leading-none">Kado CMS</p>
+          <p className="font-bold text-white text-sm leading-none">Ehdy CMS</p>
           <p className="text-gray-400 text-xs mt-0.5">Admin Panel</p>
         </div>
       </div>

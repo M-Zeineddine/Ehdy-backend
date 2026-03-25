@@ -5,7 +5,7 @@ const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KE
 
 const emailConfig = {
   fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
-  fromName: process.env.RESEND_FROM_NAME || 'Kado',
+  fromName: process.env.RESEND_FROM_NAME || 'Ehdy',
 };
 
 module.exports = { resend, emailConfig };

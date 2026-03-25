@@ -30,7 +30,7 @@ function LoginForm() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-white/10 rounded-2xl mb-4">
             <span className="text-3xl">🎁</span>
           </div>
-          <h1 className="text-3xl font-bold text-white">Kado CMS</h1>
+          <h1 className="text-3xl font-bold text-white">Ehdy CMS</h1>
           <p className="text-brand-300 mt-1">Admin Control Panel</p>
         </div>
         <div className="card p-8">
@@ -39,7 +39,7 @@ function LoginForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <input type="email" className="input" placeholder="admin@kado.app" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+              <input type="email" className="input" placeholder="admin@ehdy.app" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>

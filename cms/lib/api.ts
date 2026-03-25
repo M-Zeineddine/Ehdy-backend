@@ -10,7 +10,7 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = Cookies.get('kado_admin_token');
+  const token = Cookies.get('ehdy_admin_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -19,7 +19,7 @@ api.interceptors.response.use(
   (res) => res,
   (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
-      Cookies.remove('kado_admin_token');
+      Cookies.remove('ehdy_admin_token');
       window.location.href = '/cms/login';
     }
     return Promise.reject(error);
