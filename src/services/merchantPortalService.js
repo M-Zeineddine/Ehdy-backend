@@ -6,8 +6,6 @@ const { query } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
-const BCRYPT_ROUNDS = 12;
-
 /**
  * Merchant portal login.
  */
@@ -122,7 +120,7 @@ async function getMerchantDashboard(merchantId) {
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
               WHEN gi.store_credit_preset_id IS NOT NULL
                 THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
-              ELSE CONCAT(gi.custom_credit_amount::text, ' ', gi.currency_code, ' Store Credit')
+              ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
             END AS gift_card_name,
             CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type
      FROM gift_instances gi

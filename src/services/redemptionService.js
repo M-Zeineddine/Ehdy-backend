@@ -12,17 +12,18 @@ const logger = require('../utils/logger');
  *   2. store_credit_preset_id → store_credit_presets.merchant_id
  *   3. custom_credit_merchant_id (direct FK)
  */
+// gift_instances has no custom_credit_amount column — use initial_balance for display
 const GIFT_INSTANCE_SELECT = `
   SELECT gi.id, gi.redemption_code, gi.current_balance, gi.initial_balance,
          gi.is_redeemed, gi.redeemed_at, gi.expiration_date, gi.item_claimed,
-         gi.currency_code, gi.custom_credit_amount, gi.merchant_item_id,
+         gi.currency_code, gi.merchant_item_id,
          gi.store_credit_preset_id, gi.custom_credit_merchant_id,
          CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
          CASE
            WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
            WHEN gi.store_credit_preset_id IS NOT NULL
              THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
-           ELSE CONCAT(gi.custom_credit_amount::text, ' ', gi.currency_code, ' Store Credit')
+           ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
          END AS gift_card_name,
          mi.name AS item_name,
          COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) AS merchant_id,
@@ -31,13 +32,13 @@ const GIFT_INSTANCE_SELECT = `
          u.first_name AS owner_first_name,
          u.last_name  AS owner_last_name
   FROM gift_instances gi
-  LEFT JOIN merchant_items       mi     ON mi.id     = gi.merchant_item_id
-  LEFT JOIN store_credit_presets scp    ON scp.id    = gi.store_credit_preset_id
-  LEFT JOIN merchants            m_mi   ON m_mi.id   = mi.merchant_id
-  LEFT JOIN merchants            m_scp  ON m_scp.id  = scp.merchant_id
+  LEFT JOIN merchant_items       mi       ON mi.id     = gi.merchant_item_id
+  LEFT JOIN store_credit_presets scp      ON scp.id    = gi.store_credit_preset_id
+  LEFT JOIN merchants            m_mi     ON m_mi.id   = mi.merchant_id
+  LEFT JOIN merchants            m_scp    ON m_scp.id  = scp.merchant_id
   LEFT JOIN merchants            m_custom ON m_custom.id = gi.custom_credit_merchant_id
-  LEFT JOIN wallet_items         wi     ON wi.gift_instance_id = gi.id
-  LEFT JOIN users                u      ON u.id = wi.user_id
+  LEFT JOIN wallet_items         wi       ON wi.gift_instance_id = gi.id
+  LEFT JOIN users                u        ON u.id = wi.user_id
 `;
 
 /**
@@ -77,7 +78,7 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
     is_valid: true,
     gift: {
       type: instance.type,
-      value: instance.current_balance ?? instance.custom_credit_amount,
+      value: instance.current_balance ?? instance.initial_balance,
       currency: instance.currency_code,
       item_name: instance.item_name ?? null,
       merchant_name: instance.merchant_name,
@@ -103,7 +104,7 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
                 WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
                 WHEN gi.store_credit_preset_id IS NOT NULL
                   THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
-                ELSE CONCAT(gi.custom_credit_amount::text, ' ', gi.currency_code, ' Store Credit')
+                ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
               END AS gift_card_name,
               COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) AS merchant_id,
               wi.user_id AS wallet_owner_id
@@ -267,7 +268,7 @@ async function getMerchantRedemptions(merchantId, { page, limit, date_from, date
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
               WHEN gi.store_credit_preset_id IS NOT NULL
                 THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
-              ELSE CONCAT(gi.custom_credit_amount::text, ' ', gi.currency_code, ' Store Credit')
+              ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
             END AS gift_card_name
      FROM gift_instances gi
      LEFT JOIN merchant_items       mi  ON mi.id  = gi.merchant_item_id
