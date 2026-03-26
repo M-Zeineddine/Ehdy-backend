@@ -103,7 +103,7 @@ function renderItemCards(items) {
   `).join('');
 }
 
-function renderGiftPage({ gift, items, redemptionCode, recipientName, branches = [] }) {
+function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [] }) {
   const theme = getTheme(gift.theme);
   const [c1, c2] = theme.gradient;
   const senderName = gift.sender_name || 'Someone';
@@ -111,9 +111,7 @@ function renderGiftPage({ gift, items, redemptionCode, recipientName, branches =
   const displayRecipient = recipientName || 'You';
   const merchantName = items[0]?.merchantName || '';
   const itemName = items[0]?.itemName || '';
-  const qrUrl = redemptionCode
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(redemptionCode)}&margin=8`
-    : null;
+  const qrUrl = redemptionQr || null;
 
   // Card aspect ratio matches the app: height = width × 0.58
   // We use padding-bottom trick so it scales responsively
@@ -761,7 +759,8 @@ router.get('/:shareCode', async (req, res) => {
     const result = await query(
       `SELECT
          gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme, gs.payment_status,
-         gs.merchant_item_id, gs.store_credit_preset_id,
+         gs.merchant_item_id, gs.store_credit_preset_id, gs.custom_credit_merchant_id,
+         gs.custom_credit_amount, gs.custom_credit_currency,
          mi.name          AS item_name,
          mi.price         AS item_price,
          mi.currency_code AS item_currency,
@@ -772,12 +771,15 @@ router.get('/:shareCode', async (req, res) => {
          scp.currency_code AS credit_currency,
          scp_m.id         AS credit_merchant_id,
          scp_m.name       AS credit_merchant,
-         gi.redemption_code
+         m_custom.id      AS custom_merchant_id,
+         m_custom.name    AS custom_merchant,
+         gi.redemption_code, gi.redemption_qr_code
        FROM gifts_sent gs
        LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
        LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
        LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
        LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
+       LEFT JOIN merchants m_custom       ON m_custom.id = gs.custom_credit_merchant_id
        LEFT JOIN gift_instances gi        ON gi.gift_sent_id = gs.id
        WHERE gs.unique_share_link = $1
        LIMIT 1`,
@@ -794,11 +796,20 @@ router.get('/:shareCode', async (req, res) => {
       return res.status(404).send(renderNotFound());
     }
 
-    const isCredit = !!row.store_credit_preset_id;
-    const merchantName = isCredit ? row.credit_merchant : row.item_merchant;
-    const itemName = isCredit
+    const isPresetCredit = !!row.store_credit_preset_id;
+    const isCustomCredit = !!row.custom_credit_merchant_id;
+    const isCredit = isPresetCredit || isCustomCredit;
+
+    const merchantName = isPresetCredit ? row.credit_merchant
+      : isCustomCredit ? row.custom_merchant
+      : row.item_merchant;
+
+    const itemName = isPresetCredit
       ? `${row.credit_currency} ${row.credit_amount} Store Credit`
+      : isCustomCredit
+      ? `${row.custom_credit_currency || 'USD'} ${row.custom_credit_amount} Store Credit`
       : (row.item_name || 'Gift');
+
     const itemDetails = isCredit ? null : (row.item_currency && row.item_price ? `${row.item_currency} ${row.item_price}` : null);
     const imageUrl = isCredit ? null : (row.item_image || null);
 
@@ -806,7 +817,9 @@ router.get('/:shareCode', async (req, res) => {
     const items = [{ imageUrl, merchantName, itemName, details: itemDetails }];
 
     // Fetch branches for the merchant
-    const merchantId = isCredit ? row.credit_merchant_id : row.item_merchant_id;
+    const merchantId = isPresetCredit ? row.credit_merchant_id
+      : isCustomCredit ? row.custom_merchant_id
+      : row.item_merchant_id;
     let branches = [];
     if (merchantId) {
       const branchResult = await query(
@@ -823,6 +836,7 @@ router.get('/:shareCode', async (req, res) => {
       gift: row,
       items,
       redemptionCode: row.redemption_code || null,
+      redemptionQr: row.redemption_qr_code || null,
       recipientName: row.recipient_name || null,
       branches,
     }));
