@@ -101,16 +101,59 @@ async function verifyEmail({ email, code }) {
     throw new AppError('Invalid verification code', 400, 'INVALID_CODE');
   }
 
-  await query(
+  const userResult = await query(
     `UPDATE users SET is_email_verified = TRUE, email_verified_at = NOW(), updated_at = NOW()
-     WHERE email = $1`,
+     WHERE email = $1
+     RETURNING id, phone`,
     [email.toLowerCase()]
   );
 
   await redis.del(key);
 
   logger.info('Email verified', { email });
+
+  // Claim any pending gifts that were sent to this user's phone number
+  const user = userResult.rows[0];
+  if (user?.phone) {
+    await claimPendingGiftsForPhone(user.id, user.phone);
+  }
+
   return true;
+}
+
+/**
+ * After a user registers and verifies their email, check if any paid gifts
+ * were sent to their phone number before they had an account, and add them
+ * to their wallet automatically.
+ */
+async function claimPendingGiftsForPhone(userId, phone) {
+  const pending = await query(
+    `SELECT gs.id, gi.id AS instance_id, gs.sender_user_id
+     FROM gifts_sent gs
+     JOIN gift_instances gi ON gi.gift_sent_id = gs.id
+     WHERE gs.recipient_phone = $1
+       AND gs.payment_status = 'paid'
+       AND gs.recipient_user_id IS NULL
+`,
+    [phone]
+  );
+
+  if (!pending.rows.length) return;
+
+  for (const row of pending.rows) {
+    await query(
+      `UPDATE gifts_sent SET recipient_user_id = $1, updated_at = NOW() WHERE id = $2`,
+      [userId, row.id]
+    );
+    await query(
+      `INSERT INTO wallet_items (user_id, gift_instance_id, sender_user_id, gift_sent_id)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT DO NOTHING`,
+      [userId, row.instance_id, row.sender_user_id, row.id]
+    );
+  }
+
+  logger.info('Claimed pending gifts on registration', { userId, phone, count: pending.rows.length });
 }
 
 /**

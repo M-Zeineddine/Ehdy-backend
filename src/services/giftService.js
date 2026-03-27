@@ -679,10 +679,15 @@ async function initiateGiftPayment(userId, {
 
   // Get sender info for Tap customer object
   const userResult = await query(
-    'SELECT email, first_name FROM users WHERE id = $1',
+    'SELECT email, first_name, phone FROM users WHERE id = $1',
     [userId]
   );
   const user = userResult.rows[0] || {};
+
+  // Prevent sending a gift to yourself
+  if (recipient_phone && user.phone && user.phone === recipient_phone) {
+    throw new AppError('You cannot send a gift to yourself', 400, 'SELF_SEND_NOT_ALLOWED');
+  }
 
   // Generate share link now so it's ready when the recipient gets the link
   const shareCode = await generateUniqueShareCode();
