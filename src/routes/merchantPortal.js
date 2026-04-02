@@ -127,6 +127,8 @@ router.post(
   validate,
   merchantPortalController.validateRedemption
 );
+router.post('/send-redemption-otp', redemptionLimiter, merchantPortalController.sendRedemptionOtp);
+router.post('/verify-redemption-otp', redemptionLimiter, merchantPortalController.verifyRedemptionOtp);
 router.post(
   '/confirm-redemption',
   redemptionLimiter,

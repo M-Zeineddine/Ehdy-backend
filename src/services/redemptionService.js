@@ -4,6 +4,9 @@ const { query, withTransaction } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
+const { getRedisClient } = require('../utils/redis');
+
+const REDEMPTION_OTP_TTL = 5 * 60; // 5 minutes
 
 /**
  * Resolve the effective merchant_id and display name for a gift_instance row.
@@ -94,6 +97,13 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
  * Confirm and process a redemption.
  */
 async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes }) {
+  const redis = await getRedisClient();
+  const verified = await redis.get(`redemption_verified:${redemptionCode}`);
+  if (!verified) {
+    throw new AppError('Recipient OTP verification required before redemption.', 403, 'OTP_REQUIRED');
+  }
+  await redis.del(`redemption_verified:${redemptionCode}`);
+
   return withTransaction(async (client) => {
     const result = await client.query(
       `SELECT gi.id, gi.current_balance, gi.is_redeemed, gi.expiration_date,
@@ -285,4 +295,71 @@ async function getMerchantRedemptions(merchantId, { page, limit, date_from, date
   };
 }
 
-module.exports = { validateRedemptionCode, confirmRedemption, getMerchantRedemptions };
+/**
+ * Send a WhatsApp OTP to the recipient of a gift instance for redemption confirmation.
+ */
+async function sendRedemptionOtp(redemptionCode) {
+  const result = await query(
+    `SELECT gs.recipient_phone
+     FROM gift_instances gi
+     LEFT JOIN gifts_sent gs ON gs.id = gi.gift_sent_id
+     WHERE gi.redemption_code = $1`,
+    [redemptionCode]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError('Redemption code not found', 404, 'CODE_NOT_FOUND');
+  }
+
+  const phone = result.rows[0].recipient_phone;
+  if (!phone) {
+    throw new AppError('No phone number on file for this gift recipient', 400, 'NO_PHONE');
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const redis = await getRedisClient();
+  await redis.set(`redemption_otp:${redemptionCode}`, code, { EX: REDEMPTION_OTP_TTL });
+
+  const res = await fetch('https://api.verifyway.com/api/v1/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.VERIFYWAY_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: phone,
+      type: 'otp',
+      channel: 'whatsapp',
+      fallback: 'no',
+      code,
+      lang: 'en',
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    logger.error('VerifyWay redemption OTP error', data);
+    throw new AppError('Failed to send verification code', 500, 'OTP_SEND_FAILED');
+  }
+
+  logger.info(`Redemption OTP sent for code ${redemptionCode} to ${phone}`);
+}
+
+/**
+ * Verify the redemption OTP and store a short-lived verified flag.
+ */
+async function verifyRedemptionOtp(redemptionCode, code) {
+  const redis = await getRedisClient();
+  const stored = await redis.get(`redemption_otp:${redemptionCode}`);
+
+  if (!stored) throw new AppError('Code expired. Request a new one.', 400, 'OTP_EXPIRED');
+  if (stored !== code) throw new AppError('Invalid verification code.', 400, 'INVALID_CODE');
+
+  await redis.del(`redemption_otp:${redemptionCode}`);
+  await redis.set(`redemption_verified:${redemptionCode}`, '1', { EX: REDEMPTION_OTP_TTL });
+
+  logger.info(`Redemption OTP verified for code ${redemptionCode}`);
+}
+
+module.exports = { validateRedemptionCode, sendRedemptionOtp, verifyRedemptionOtp, confirmRedemption, getMerchantRedemptions };

@@ -3,6 +3,7 @@
 const merchantPortalService = require('../services/merchantPortalService');
 const redemptionService = require('../services/redemptionService');
 const { successResponse, paginatedResponse } = require('../utils/formatters');
+const { AppError } = require('../middleware/errorHandler');
 
 const login = async (req, res, next) => {
   try {
@@ -36,6 +37,24 @@ const validateRedemption = async (req, res, next) => {
   }
 };
 
+const sendRedemptionOtp = async (req, res, next) => {
+  try {
+    const { redemption_code } = req.body;
+    if (!redemption_code) return next(new AppError('Redemption code is required', 400));
+    await redemptionService.sendRedemptionOtp(redemption_code.toUpperCase());
+    return successResponse(res, null, 'Verification code sent to recipient.');
+  } catch (err) { return next(err); }
+};
+
+const verifyRedemptionOtp = async (req, res, next) => {
+  try {
+    const { redemption_code, code } = req.body;
+    if (!redemption_code || !code) return next(new AppError('Redemption code and OTP are required', 400));
+    await redemptionService.verifyRedemptionOtp(redemption_code.toUpperCase(), code);
+    return successResponse(res, null, 'Recipient verified.');
+  } catch (err) { return next(err); }
+};
+
 const confirmRedemption = async (req, res, next) => {
   try {
     const { redemption_code, amount_to_redeem, notes } = req.body;
@@ -65,4 +84,4 @@ const getRedemptions = async (req, res, next) => {
   }
 };
 
-module.exports = { login, getDashboard, validateRedemption, confirmRedemption, getRedemptions };
+module.exports = { login, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp, confirmRedemption, getRedemptions };
