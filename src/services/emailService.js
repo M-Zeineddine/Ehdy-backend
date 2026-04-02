@@ -1,21 +1,21 @@
 'use strict';
 
-const { resend, emailConfig } = require('../config/email');
+const { transporter, emailConfig } = require('../config/email');
 const logger = require('../utils/logger');
 
 const FROM = `${emailConfig.fromName} <${emailConfig.fromEmail}>`;
 
 /**
- * Send a raw email via Resend.
+ * Send a raw email via Zoho SMTP.
  */
 async function sendEmail({ to, subject, html }) {
-  if (!resend) {
-    logger.warn('Resend not configured, skipping email', { to, subject });
+  if (!transporter) {
+    logger.warn('SMTP not configured, skipping email', { to, subject });
     return;
   }
 
   try {
-    await resend.emails.send({ from: FROM, to, subject, html });
+    await transporter.sendMail({ from: FROM, to, subject, html });
     logger.info('Email sent', { to, subject });
   } catch (err) {
     logger.error('Failed to send email', { to, subject, error: err.message });
