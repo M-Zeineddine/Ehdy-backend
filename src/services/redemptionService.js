@@ -4,7 +4,7 @@ const { query, withTransaction } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
-const { getRedisClient } = require('../utils/redis');
+const { getRedisClient } = require('../config/redis');
 
 const REDEMPTION_OTP_TTL = 5 * 60; // 5 minutes
 
