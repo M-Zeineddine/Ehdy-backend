@@ -13,6 +13,7 @@ const logger = require('../utils/logger');
 const BCRYPT_ROUNDS = 12;
 const EMAIL_VERIFY_TTL = 15 * 60; // 15 minutes in seconds
 const PASSWORD_RESET_TTL = 60 * 60; // 1 hour in seconds
+const PHONE_OTP_TTL = 10 * 60; // 10 minutes in seconds
 
 /**
  * Generate JWT access token.
@@ -161,7 +162,7 @@ async function claimPendingGiftsForPhone(userId, phone) {
  */
 async function signin({ email, password, skipPasswordCheck = false }) {
   const result = await query(
-    `SELECT id, email, password_hash, first_name, last_name, is_email_verified, auth_provider, deleted_at
+    `SELECT id, email, password_hash, first_name, last_name, phone, is_email_verified, is_phone_verified, auth_provider, deleted_at
      FROM users WHERE email = $1`,
     [email.toLowerCase()]
   );
@@ -206,7 +207,9 @@ async function signin({ email, password, skipPasswordCheck = false }) {
       email: user.email,
       first_name: user.first_name,
       last_name: user.last_name,
+      phone: user.phone,
       is_email_verified: user.is_email_verified,
+      is_phone_verified: user.is_phone_verified,
     },
   };
 }
@@ -332,6 +335,59 @@ async function socialLogin({ provider, id_token, email, first_name, last_name })
   return { access_token, refresh_token, user };
 }
 
+/**
+ * Send a WhatsApp OTP to the given phone number via VerifyWay.
+ */
+async function sendPhoneOtp(phone) {
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const redis = await getRedisClient();
+  await redis.set(`phone_otp:${phone}`, code, { EX: PHONE_OTP_TTL });
+
+  const res = await fetch('https://api.verifyway.com/api/v1/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.VERIFYWAY_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: phone,
+      type: 'otp',
+      channel: 'whatsapp',
+      fallback: 'no',
+      code,
+      lang: 'en',
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    logger.error('VerifyWay error', data);
+    throw new AppError('Failed to send verification code', 500, 'OTP_SEND_FAILED');
+  }
+
+  logger.info(`Phone OTP sent to ${phone}`);
+}
+
+/**
+ * Verify phone OTP and mark the user's phone as verified.
+ */
+async function verifyPhoneOtp(phone, code) {
+  const redis = await getRedisClient();
+  const stored = await redis.get(`phone_otp:${phone}`);
+
+  if (!stored) throw new AppError('Code expired. Request a new one.', 400, 'OTP_EXPIRED');
+  if (stored !== code) throw new AppError('Invalid verification code.', 400, 'INVALID_CODE');
+
+  await redis.del(`phone_otp:${phone}`);
+  await query(
+    `UPDATE users SET is_phone_verified = TRUE, phone_verified_at = NOW(), updated_at = NOW() WHERE phone = $1`,
+    [phone]
+  );
+
+  logger.info('Phone verified', { phone });
+}
+
 module.exports = {
   signup,
   sendVerificationEmail,
@@ -341,6 +397,8 @@ module.exports = {
   forgotPassword,
   resetPassword,
   socialLogin,
+  sendPhoneOtp,
+  verifyPhoneOtp,
   generateAccessToken,
   generateRefreshToken,
 };

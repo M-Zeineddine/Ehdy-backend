@@ -192,5 +192,7 @@ router.post('/reset-password', authLimiter, resetPasswordValidation, validate, a
  *         description: Login successful
  */
 router.post('/social-login', authLimiter, socialLoginValidation, validate, authController.socialLogin);
+router.post('/send-phone-otp', authLimiter, authController.sendPhoneOtp);
+router.post('/verify-phone-otp', authLimiter, authController.verifyPhoneOtp);
 
 module.exports = router;

@@ -79,6 +79,28 @@ const socialLogin = async (req, res, next) => {
   }
 };
 
+const sendPhoneOtp = async (req, res, next) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return next(new (require('../middleware/errorHandler').AppError)('Phone is required', 400));
+    await authService.sendPhoneOtp(phone);
+    return successResponse(res, null, 'Verification code sent to WhatsApp.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const verifyPhoneOtp = async (req, res, next) => {
+  try {
+    const { phone, code } = req.body;
+    if (!phone || !code) return next(new (require('../middleware/errorHandler').AppError)('Phone and code are required', 400));
+    await authService.verifyPhoneOtp(phone, code);
+    return successResponse(res, null, 'Phone verified successfully.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const resendVerification = async (req, res, next) => {
   try {
     const { email } = req.body;
@@ -99,4 +121,6 @@ module.exports = {
   forgotPassword,
   resetPassword,
   socialLogin,
+  sendPhoneOtp,
+  verifyPhoneOtp,
 };
