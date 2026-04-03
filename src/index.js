@@ -33,19 +33,21 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 
-// ─── Swagger Docs ─────────────────────────────────────────────────────────────
-app.use(
-  '/api/docs',
-  swaggerUi.serve,
-  swaggerUi.setup(swaggerSpec, {
-    customSiteTitle: 'Ehdy API Docs',
-    customCss: '.swagger-ui .topbar { background-color: #1a1a2e; }',
-  })
-);
-app.get('/api/docs.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerSpec);
-});
+// ─── Swagger Docs (dev only) ───────────────────────────────────────────────────
+if (process.env.NODE_ENV !== 'production') {
+  app.use(
+    '/api/docs',
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      customSiteTitle: 'Ehdy API Docs',
+      customCss: '.swagger-ui .topbar { background-color: #1a1a2e; }',
+    })
+  );
+  app.get('/api/docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 // ─── Security Middleware ───────────────────────────────────────────────────────
 app.use(
