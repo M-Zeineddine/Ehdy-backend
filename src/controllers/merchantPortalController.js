@@ -61,7 +61,7 @@ const confirmRedemption = async (req, res, next) => {
     const result = await redemptionService.confirmRedemption(
       redemption_code.toUpperCase(),
       req.merchantId,
-      { amount_to_redeem, notes }
+      { amount_to_redeem, notes, merchant_user_id: req.merchantUserId, branch_id: req.branchId || null }
     );
     return successResponse(res, result, 'Redemption confirmed.');
   } catch (err) {

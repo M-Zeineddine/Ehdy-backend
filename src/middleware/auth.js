@@ -135,6 +135,7 @@ const authenticateMerchant = async (req, res, next) => {
     req.merchant = merchantUser;
     req.merchantUserId = decoded.merchantUserId;
     req.merchantId = merchantUser.merchant_id;
+    req.branchId = merchantUser.branch_id || null;
     return next();
   } catch (err) {
     logger.warn('Merchant authentication failed', { error: err.message });

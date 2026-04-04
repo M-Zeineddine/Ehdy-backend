@@ -20,7 +20,6 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const merchantRoutes = require('./routes/merchants');
 const giftCardRoutes = require('./routes/giftCards');
-const purchaseRoutes = require('./routes/purchases');
 const walletRoutes = require('./routes/wallet');
 const bundleRoutes = require('./routes/bundles');
 const giftRoutes = require('./routes/gifts');
@@ -89,9 +88,6 @@ app.use(
   })
 );
 
-// ─── Stripe Webhook (raw body must come BEFORE express.json()) ────────────────
-app.use('/v1/webhooks/stripe', express.raw({ type: 'application/json' }));
-
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -139,7 +135,6 @@ app.use('/v1/auth', authRoutes);
 app.use('/v1/users', userRoutes);
 app.use('/v1/merchants', merchantRoutes);
 app.use('/v1/gift-cards', giftCardRoutes);
-app.use('/v1/purchases', purchaseRoutes);
 app.use('/v1/wallet', walletRoutes);
 app.use('/v1/bundles', bundleRoutes);
 app.use('/v1/gifts', giftRoutes);

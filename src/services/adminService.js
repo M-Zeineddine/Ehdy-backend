@@ -187,14 +187,15 @@ async function getDashboard() {
            (SELECT COUNT(*)::int FROM gifts_sent WHERE payment_status = 'paid') AS paid_gifts,
            (SELECT COUNT(*)::int FROM gifts_sent WHERE payment_status = 'pending') AS pending_gifts,
            (SELECT COUNT(*)::int FROM gifts_sent WHERE payment_status = 'failed') AS failed_gifts,
-           (SELECT COUNT(*)::int FROM gifts_sent WHERE is_claimed = TRUE) AS claimed_gifts`
+           (SELECT COALESCE(SUM(gi.initial_balance), 0) FROM gift_instances gi JOIN gifts_sent gs ON gs.id = gi.gift_sent_id WHERE gs.payment_status = 'paid') AS total_volume`
       ),
       query(
         `SELECT
-           COUNT(*)::int AS purchase_count,
-           COALESCE(SUM(total_amount), 0) AS purchase_volume
-         FROM purchases
-         WHERE payment_status = 'succeeded'`
+           COUNT(*)::int AS gift_count,
+           COALESCE(SUM(gi.initial_balance), 0) AS gift_volume
+         FROM gifts_sent gs
+         JOIN gift_instances gi ON gi.gift_sent_id = gs.id
+         WHERE gs.payment_status = 'paid'`
       ),
       query(
         `SELECT id, email, first_name, last_name, created_at
@@ -207,7 +208,6 @@ async function getDashboard() {
            gs.id,
            gs.recipient_name,
            gs.payment_status,
-           gs.is_claimed,
            gs.sent_at,
            COALESCE(sender.first_name || ' ' || sender.last_name, sender.email) AS sender_label,
            COALESCE(m_item.name, m_credit.name) AS merchant_name,
@@ -251,7 +251,7 @@ async function getDashboard() {
     ]);
 
   const totals = totalsResult.rows[0];
-  const purchases = purchaseResult.rows[0];
+  const giftStats = purchaseResult.rows[0];
 
   return {
     totals: {
@@ -270,9 +270,8 @@ async function getDashboard() {
       paid_gifts: totals.paid_gifts,
       pending_gifts: totals.pending_gifts,
       failed_gifts: totals.failed_gifts,
-      claimed_gifts: totals.claimed_gifts,
-      purchase_count: purchases.purchase_count,
-      purchase_volume: parseFloat(purchases.purchase_volume) || 0,
+      gift_count: giftStats.gift_count,
+      gift_volume: parseFloat(giftStats.gift_volume) || 0,
     },
     recent_users: recentUsersResult.rows,
     recent_gifts: recentGiftsResult.rows,
@@ -345,8 +344,8 @@ async function listUsers({ page, limit, search, status }) {
        u.created_at,
        u.last_login_at,
        u.deleted_at,
-       (SELECT COUNT(*)::int FROM purchases p WHERE p.user_id = u.id) AS purchase_count,
-       (SELECT COALESCE(SUM(total_amount), 0) FROM purchases p WHERE p.user_id = u.id AND p.payment_status = 'succeeded') AS total_spent,
+       (SELECT COUNT(*)::int FROM gifts_sent gs WHERE gs.sender_user_id = u.id AND gs.payment_status = 'paid') AS purchase_count,
+       (SELECT COALESCE(SUM(gi.initial_balance), 0) FROM gifts_sent gs JOIN gift_instances gi ON gi.gift_sent_id = gs.id WHERE gs.sender_user_id = u.id AND gs.payment_status = 'paid') AS total_spent,
        (SELECT COUNT(*)::int FROM wallet_items wi WHERE wi.user_id = u.id) AS wallet_count,
        (SELECT COUNT(*)::int FROM gifts_sent gs WHERE gs.sender_user_id = u.id AND gs.payment_status = 'paid') AS gifts_sent_count
      FROM users u
@@ -843,66 +842,27 @@ async function updateStoreCreditStatus(storeCreditId, data) {
   return updateStoreCredit(storeCreditId, data);
 }
 
-async function listPurchases({ page, limit, search, status }) {
+async function listPurchases({ page, limit }) {
+  // Renamed conceptually: now returns redemption events, not Stripe purchases
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
-  const conditions = [];
-  const params = [];
-  let idx = 1;
 
-  if (status) {
-    conditions.push(`p.payment_status = $${idx++}`);
-    params.push(status);
-  }
-
-  if (search) {
-    conditions.push(`(
-      CAST(p.id AS TEXT) ILIKE $${idx}
-      OR u.email ILIKE $${idx}
-      OR COALESCE(u.first_name, '') ILIKE $${idx}
-      OR COALESCE(u.last_name, '') ILIKE $${idx}
-    )`);
-    params.push(`%${search.trim()}%`);
-    idx++;
-  }
-
-  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const countResult = await query(
-    `SELECT COUNT(*)::int AS total
-     FROM purchases p
-     JOIN users u ON u.id = p.user_id
-     ${whereClause}`,
-    params
-  );
-
-  params.push(lim, offset);
+  const countResult = await query(`SELECT COUNT(*)::int AS total FROM redemption_events`);
   const rowsResult = await query(
-    `SELECT
-       p.id,
-       p.user_id,
-       p.total_amount,
-       p.currency_code,
-       p.payment_status,
-       p.payment_method,
-       p.stripe_payment_intent_id,
-       p.purchased_at,
-       p.items,
-       u.email,
-       u.first_name,
-       u.last_name
-     FROM purchases p
-     JOIN users u ON u.id = p.user_id
-     ${whereClause}
-     ORDER BY p.purchased_at DESC
-     LIMIT $${idx++} OFFSET $${idx++}`,
-    params
+    `SELECT re.id, re.amount, re.currency_code, re.balance_after, re.redeemed_at,
+            gi.redemption_code, gi.type as gift_type,
+            m.name as merchant_name,
+            gs.sender_name, gs.recipient_name, gs.recipient_phone
+     FROM redemption_events re
+     JOIN gift_instances gi ON gi.id = re.gift_instance_id
+     JOIN gifts_sent gs ON gs.id = gi.gift_sent_id
+     LEFT JOIN merchants m ON m.id = re.merchant_id
+     ORDER BY re.redeemed_at DESC
+     LIMIT $1 OFFSET $2`,
+    [lim, offset]
   );
 
   return {
-    purchases: rowsResult.rows.map(row => ({
-      ...row,
-      total_amount: parseFloat(row.total_amount) || 0,
-      item_count: Array.isArray(row.items) ? row.items.length : 0,
-    })),
+    purchases: rowsResult.rows,
     pagination: paginate(countResult.rows[0].total, pg, lim),
   };
 }
@@ -957,8 +917,6 @@ async function listGifts({ page, limit, search, payment_status }) {
        gs.theme,
        gs.payment_status,
        gs.unique_share_link,
-       gs.is_claimed,
-       gs.claimed_at,
        gs.sent_at,
        gs.tap_charge_id,
        COALESCE(sender.first_name || ' ' || sender.last_name, sender.email) AS sender_label,

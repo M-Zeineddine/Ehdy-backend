@@ -84,7 +84,7 @@ router.get('/dashboard', async (req, res, next) => {
       query('SELECT COUNT(*) FROM users WHERE deleted_at IS NULL'),
       query('SELECT COUNT(*) FROM merchants WHERE deleted_at IS NULL'),
       query("SELECT COUNT(*) FROM gifts_sent WHERE DATE(sent_at) = CURRENT_DATE AND payment_status = 'paid'"),
-      query("SELECT COALESCE(SUM(total_amount), 0) as total FROM purchases WHERE payment_status = 'succeeded'"),
+      query("SELECT COALESCE(SUM(gi.initial_balance), 0) as total FROM gift_instances gi JOIN gifts_sent gs ON gs.id = gi.gift_sent_id WHERE gs.payment_status = 'paid'"),
       query('SELECT COUNT(*) FROM gift_instances WHERE is_redeemed = TRUE'),
       query("SELECT COUNT(*) FROM merchants WHERE is_verified = FALSE AND deleted_at IS NULL AND is_active = TRUE"),
       query(`
@@ -104,10 +104,11 @@ router.get('/dashboard', async (req, res, next) => {
         ORDER BY date ASC
       `),
       query(`
-        SELECT DATE(purchased_at) as date, COALESCE(SUM(total_amount), 0) as revenue
-        FROM purchases
-        WHERE purchased_at >= NOW() - INTERVAL '30 days' AND payment_status = 'succeeded'
-        GROUP BY DATE(purchased_at)
+        SELECT DATE(gs.sent_at) as date, COALESCE(SUM(gi.initial_balance), 0) as revenue
+        FROM gifts_sent gs
+        JOIN gift_instances gi ON gi.gift_sent_id = gs.id
+        WHERE gs.sent_at >= NOW() - INTERVAL '30 days' AND gs.payment_status = 'paid'
+        GROUP BY DATE(gs.sent_at)
         ORDER BY date ASC
       `),
     ]);
@@ -197,7 +198,7 @@ router.get('/users/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const [userResult, giftsResult, purchasesResult] = await Promise.all([
+    const [userResult, giftsResult] = await Promise.all([
       query(`
         SELECT id, email, first_name, last_name, phone, country_code, currency_code,
                is_email_verified, is_phone_verified, auth_provider, profile_picture_url,
@@ -205,14 +206,9 @@ router.get('/users/:id', async (req, res, next) => {
         FROM users WHERE id = $1
       `, [id]),
       query(`
-        SELECT id, recipient_name, recipient_email, theme, payment_status, sent_at
+        SELECT id, recipient_name, recipient_phone, theme, payment_status, sent_at
         FROM gifts_sent WHERE sender_user_id = $1
         ORDER BY sent_at DESC LIMIT 10
-      `, [id]),
-      query(`
-        SELECT id, total_amount, currency_code, payment_status, purchased_at
-        FROM purchases WHERE user_id = $1
-        ORDER BY purchased_at DESC LIMIT 10
       `, [id]),
     ]);
 
@@ -225,7 +221,6 @@ router.get('/users/:id', async (req, res, next) => {
       data: {
         user: userResult.rows[0],
         recent_gifts: giftsResult.rows,
-        recent_purchases: purchasesResult.rows,
       },
     });
   } catch (err) {
@@ -596,16 +591,31 @@ router.get('/gifts', async (req, res, next) => {
     const giftsResult = await query(`
       SELECT gs.id, gs.sender_name, gs.recipient_name, gs.recipient_email,
              gs.recipient_phone, gs.theme, gs.payment_status,
-             gs.is_claimed, gs.claimed_at, gs.sent_at,
-             gs.expiration_date, gs.tap_charge_id, gs.share_code,
-             u.email as sender_user_email,
-             m.name as merchant_name
+             gs.sent_at,
+             gs.expiration_date, gs.tap_charge_id, gs.unique_share_link AS share_code,
+             u.email AS sender_user_email,
+             CASE
+               WHEN COUNT(gi.merchant_item_id) FILTER (WHERE gi.merchant_item_id IS NOT NULL) > 0
+               THEN 'gift_item' ELSE 'store_credit'
+             END AS gift_type,
+             MAX(mi.name) AS item_name,
+             SUM(gi.initial_balance) AS initial_balance,
+             SUM(gi.current_balance) AS current_balance,
+             SUM(COALESCE(gi.redeemed_amount, 0)) AS redeemed_amount,
+             MAX(gi.currency_code) AS currency_code,
+             COALESCE(MAX(m_mi.name), MAX(m_scp.name), MAX(m_cust.name)) AS merchant_name,
+             string_agg(DISTINCT gi.redemption_code, E'\n' ORDER BY gi.redemption_code) AS redemption_codes,
+             MAX(gi.qr_scanned_at) AS redeemed_at
       FROM gifts_sent gs
       LEFT JOIN users u ON u.id = gs.sender_user_id
       LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-      LEFT JOIN merchants m ON m.id = mi.merchant_id
+      LEFT JOIN store_credit_presets scp ON scp.id = gi.store_credit_preset_id
+      LEFT JOIN merchants m_mi   ON m_mi.id  = mi.merchant_id
+      LEFT JOIN merchants m_scp  ON m_scp.id = scp.merchant_id
+      LEFT JOIN merchants m_cust ON m_cust.id = gi.custom_credit_merchant_id
       ${whereClause}
+      GROUP BY gs.id, u.email
       ORDER BY gs.sent_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
@@ -627,38 +637,52 @@ router.get('/gifts', async (req, res, next) => {
   }
 });
 
-// ─── Transactions ─────────────────────────────────────────────────────────────
+// ─── Gift Redemption History ──────────────────────────────────────────────────
+router.get('/gifts/:giftSentId/redemptions', async (req, res, next) => {
+  try {
+    const { giftSentId } = req.params;
+    const result = await query(
+      `SELECT re.id, re.amount, re.currency_code, re.balance_after, re.notes, re.redeemed_at,
+              gi.redemption_code, gi.initial_balance, gi.type,
+              m.name AS merchant_name
+       FROM redemption_events re
+       JOIN gift_instances gi ON gi.id = re.gift_instance_id
+       LEFT JOIN merchants m ON m.id = re.merchant_id
+       WHERE gi.gift_sent_id = $1
+       ORDER BY re.redeemed_at ASC`,
+      [giftSentId]
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// ─── Redemption Events (replaces old Transactions) ────────────────────────────
 router.get('/transactions', async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const conditions = [];
-    const params = [];
-
-    if (status) {
-      params.push(status);
-      conditions.push(`p.payment_status = $${params.length}`);
-    }
-
-    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
-
-    const countResult = await query(`SELECT COUNT(*) FROM purchases p ${whereClause}`, params);
+    const countResult = await query(`SELECT COUNT(*) FROM redemption_events`);
     const total = parseInt(countResult.rows[0].count);
 
-    params.push(parseInt(limit));
-    params.push(offset);
-
     const result = await query(`
-      SELECT p.id, p.total_amount, p.currency_code, p.payment_status,
-             p.payment_method, p.stripe_payment_intent_id, p.purchased_at,
-             u.email as user_email, u.first_name, u.last_name
-      FROM purchases p
-      LEFT JOIN users u ON u.id = p.user_id
-      ${whereClause}
-      ORDER BY p.purchased_at DESC
-      LIMIT $${params.length - 1} OFFSET $${params.length}
-    `, params);
+      SELECT re.id, re.amount, re.currency_code, re.balance_after, re.notes, re.redeemed_at,
+             gi.redemption_code, gi.type as gift_type,
+             m.name as merchant_name,
+             mu.first_name as staff_first_name, mu.last_name as staff_last_name,
+             mb.name as branch_name,
+             gs.sender_name, gs.recipient_name, gs.recipient_phone
+      FROM redemption_events re
+      JOIN gift_instances gi ON gi.id = re.gift_instance_id
+      JOIN gifts_sent gs ON gs.id = gi.gift_sent_id
+      LEFT JOIN merchants m ON m.id = re.merchant_id
+      LEFT JOIN merchant_users mu ON mu.id = re.merchant_user_id
+      LEFT JOIN merchant_branches mb ON mb.id = re.branch_id
+      ORDER BY re.redeemed_at DESC
+      LIMIT $1 OFFSET $2
+    `, [parseInt(limit), offset]);
 
     return res.json({
       success: true,
@@ -705,10 +729,11 @@ router.get('/analytics', async (req, res, next) => {
         GROUP BY DATE(sent_at) ORDER BY date ASC
       `),
       query(`
-        SELECT DATE(purchased_at) as date, COALESCE(SUM(total_amount), 0) as revenue
-        FROM purchases
-        WHERE purchased_at >= NOW() - INTERVAL '${days} days' AND payment_status = 'succeeded'
-        GROUP BY DATE(purchased_at) ORDER BY date ASC
+        SELECT DATE(gs.sent_at) as date, COALESCE(SUM(gi.initial_balance), 0) as revenue
+        FROM gifts_sent gs
+        JOIN gift_instances gi ON gi.gift_sent_id = gs.id
+        WHERE gs.sent_at >= NOW() - INTERVAL '${days} days' AND gs.payment_status = 'paid'
+        GROUP BY DATE(gs.sent_at) ORDER BY date ASC
       `),
       query(`
         SELECT m.name, m.logo_url,

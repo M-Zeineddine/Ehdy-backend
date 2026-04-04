@@ -96,7 +96,7 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
 /**
  * Confirm and process a redemption.
  */
-async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes }) {
+async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id, branch_id }) {
   const redis = await getRedisClient();
   const verified = await redis.get(`redemption_verified:${redemptionCode}`);
   if (!verified) {
@@ -196,6 +196,23 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
         [merchantId, instance.id]
       );
     }
+
+    // Always log the redemption event for audit trail
+    await client.query(
+      `INSERT INTO redemption_events
+         (gift_instance_id, merchant_id, merchant_user_id, branch_id, amount, currency_code, balance_after, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        instance.id,
+        merchantId,
+        merchant_user_id || null,
+        branch_id || null,
+        instance.type === 'store_credit' ? parseFloat(amount_to_redeem) : null,
+        instance.currency_code,
+        instance.type === 'store_credit' ? newBalance : null,
+        notes || null,
+      ]
+    );
 
     // Log transaction for the wallet owner
     if (instance.wallet_owner_id) {
