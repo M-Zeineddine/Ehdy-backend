@@ -337,6 +337,13 @@ async function sendRedemptionOtp(redemptionCode) {
     throw new AppError('No phone number on file for this gift recipient', 400, 'NO_PHONE');
   }
 
+  // OTP_VERIFICATION_ENABLED: set to true to re-enable VerifyWay OTP sending
+  const OTP_VERIFICATION_ENABLED = false;
+  if (!OTP_VERIFICATION_ENABLED) {
+    logger.info(`Redemption OTP skipped (disabled) for code ${redemptionCode}`);
+    return;
+  }
+
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   const redis = await getRedisClient();
   await redis.set(`redemption_otp:${redemptionCode}`, code, { EX: REDEMPTION_OTP_TTL });
@@ -358,7 +365,8 @@ async function sendRedemptionOtp(redemptionCode) {
     }),
   });
 
-  const data = await res.json();
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
     logger.error('VerifyWay redemption OTP error', data);
     throw new AppError('Failed to send verification code', 500, 'OTP_SEND_FAILED');
