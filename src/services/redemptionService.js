@@ -379,6 +379,13 @@ async function sendRedemptionOtp(redemptionCode) {
  * Verify the redemption OTP and store a short-lived verified flag.
  */
 async function verifyRedemptionOtp(redemptionCode, code) {
+  // OTP_VERIFICATION_ENABLED: set to true to re-enable OTP verification
+  const OTP_VERIFICATION_ENABLED = false;
+  if (!OTP_VERIFICATION_ENABLED) {
+    logger.info(`Redemption OTP verification skipped (disabled) for code ${redemptionCode}`);
+    return;
+  }
+
   const redis = await getRedisClient();
   const stored = await redis.get(`redemption_otp:${redemptionCode}`);
 
