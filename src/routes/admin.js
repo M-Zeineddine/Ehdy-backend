@@ -592,7 +592,7 @@ router.get('/gifts', async (req, res, next) => {
       SELECT gs.id, gs.sender_name, gs.recipient_name, gs.recipient_email,
              gs.recipient_phone, gs.theme, gs.payment_status,
              gs.sent_at,
-             gs.expiration_date, gs.tap_charge_id, gs.unique_share_link AS share_code,
+             gs.tap_charge_id, gs.unique_share_link AS share_code,
              u.email AS sender_user_email,
              CASE
                WHEN COUNT(gi.merchant_item_id) FILTER (WHERE gi.merchant_item_id IS NOT NULL) > 0
