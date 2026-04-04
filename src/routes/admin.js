@@ -597,7 +597,7 @@ router.get('/gifts', async (req, res, next) => {
       SELECT gs.id, gs.sender_name, gs.recipient_name, gs.recipient_email,
              gs.recipient_phone, gs.theme, gs.payment_status,
              gs.is_claimed, gs.claimed_at, gs.sent_at,
-             gs.expiration_date, gs.tap_charge_id,
+             gs.expiration_date, gs.tap_charge_id, gs.share_code,
              u.email as sender_user_email,
              m.name as merchant_name
       FROM gifts_sent gs

@@ -13,6 +13,7 @@ interface Gift {
   theme: string; delivery_channel: string; payment_status: string;
   is_claimed: boolean; sent_at: string; expiration_date: string | null;
   tap_charge_id: string | null; merchant_name: string | null;
+  share_code: string | null;
 }
 
 interface PaginationData { total: number; page: number; limit: number; pages: number; }
@@ -94,13 +95,14 @@ export default function GiftsPage() {
                 <th className="px-5 py-3 text-left font-medium">Status</th>
                 <th className="px-5 py-3 text-left font-medium">Claimed</th>
                 <th className="px-5 py-3 text-left font-medium">Sent At</th>
+                <th className="px-5 py-3 text-left font-medium">Gift Code</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
-                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={9} className="px-5 py-10 text-center text-gray-400">Loading…</td></tr>
               ) : gifts.length === 0 ? (
-                <tr><td colSpan={8} className="px-5 py-10 text-center text-gray-400">No gifts found</td></tr>
+                <tr><td colSpan={9} className="px-5 py-10 text-center text-gray-400">No gifts found</td></tr>
               ) : gifts.map(g => (
                 <tr key={g.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-5 py-3">
@@ -128,6 +130,11 @@ export default function GiftsPage() {
                   </td>
                   <td className="px-5 py-3 text-gray-500 text-xs">
                     {g.sent_at ? format(new Date(g.sent_at), 'MMM d, HH:mm') : '—'}
+                  </td>
+                  <td className="px-5 py-3">
+                    {g.share_code
+                      ? <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{g.share_code}</span>
+                      : <span className="text-gray-400">—</span>}
                   </td>
                 </tr>
               ))}
