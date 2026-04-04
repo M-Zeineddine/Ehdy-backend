@@ -97,12 +97,16 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
  * Confirm and process a redemption.
  */
 async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id, branch_id }) {
-  const redis = await getRedisClient();
-  const verified = await redis.get(`redemption_verified:${redemptionCode}`);
-  if (!verified) {
-    throw new AppError('Recipient OTP verification required before redemption.', 403, 'OTP_REQUIRED');
+  // OTP_VERIFICATION_ENABLED: set to true to re-enable recipient OTP check
+  const OTP_VERIFICATION_ENABLED = false;
+  if (OTP_VERIFICATION_ENABLED) {
+    const redis = await getRedisClient();
+    const verified = await redis.get(`redemption_verified:${redemptionCode}`);
+    if (!verified) {
+      throw new AppError('Recipient OTP verification required before redemption.', 403, 'OTP_REQUIRED');
+    }
+    await redis.del(`redemption_verified:${redemptionCode}`);
   }
-  await redis.del(`redemption_verified:${redemptionCode}`);
 
   return withTransaction(async (client) => {
     const result = await client.query(
