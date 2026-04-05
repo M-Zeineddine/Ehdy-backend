@@ -545,6 +545,48 @@ async function initiateGiftPayment(userId, {
     throw new AppError('You cannot send a gift to yourself', 400, 'SELF_SEND_NOT_ALLOWED');
   }
 
+  // Idempotency: return existing pending record if the same user is sending
+  // the same gift to the same recipient within the last 5 minutes (prevents double-tap duplicates)
+  const existingPending = await query(
+    `SELECT id, tap_charge_id, unique_share_link FROM gifts_sent
+     WHERE sender_user_id = $1
+       AND payment_status = 'pending'
+       AND tap_charge_id IS NOT NULL
+       AND (merchant_item_id IS NOT DISTINCT FROM $2)
+       AND (store_credit_preset_id IS NOT DISTINCT FROM $3)
+       AND (custom_credit_merchant_id IS NOT DISTINCT FROM $4)
+       AND (recipient_phone IS NOT DISTINCT FROM $5)
+       AND created_at > NOW() - INTERVAL '5 minutes'
+     LIMIT 1`,
+    [
+      userId,
+      merchant_item_id || null,
+      store_credit_preset_id || null,
+      custom_credit_merchant_id || null,
+      recipient_phone || null,
+    ]
+  );
+
+  if (existingPending.rows.length) {
+    const existing = existingPending.rows[0];
+    const { createTapCharge, getTapCharge } = require('./paymentService');
+    try {
+      const charge = await getTapCharge(existing.tap_charge_id);
+      if (charge?.transaction?.url) {
+        logger.info('Returning existing pending gift for idempotency', { giftSentId: existing.id });
+        return {
+          gift_sent_id: existing.id,
+          tap_transaction_url: charge.transaction.url,
+          unique_share_link: existing.unique_share_link,
+          amount,
+          currency,
+        };
+      }
+    } catch (_) {
+      // Tap charge no longer valid — fall through and create a fresh one
+    }
+  }
+
   // Generate share link now so it's ready when the recipient gets the link
   const shareCode = await generateUniqueShareCode();
 

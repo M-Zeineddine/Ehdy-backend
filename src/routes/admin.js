@@ -605,7 +605,13 @@ router.get('/gifts', async (req, res, next) => {
              MAX(gi.currency_code) AS currency_code,
              COALESCE(MAX(m_mi.name), MAX(m_scp.name), MAX(m_cust.name)) AS merchant_name,
              string_agg(DISTINCT gi.redemption_code, E'\n' ORDER BY gi.redemption_code) AS redemption_codes,
-             MAX(gi.qr_scanned_at) AS redeemed_at
+             MAX(gi.qr_scanned_at) AS redeemed_at,
+             CASE
+               WHEN COUNT(gi.id) = 0 THEN NULL
+               WHEN BOOL_OR(gi.is_redeemed) THEN 'redeemed'
+               WHEN SUM(gi.current_balance) < SUM(gi.initial_balance) THEN 'partially_redeemed'
+               ELSE 'active'
+             END AS redemption_status
       FROM gifts_sent gs
       LEFT JOIN users u ON u.id = gs.sender_user_id
       LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
