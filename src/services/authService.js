@@ -37,19 +37,52 @@ function generateRefreshToken(userId) {
  * Register a new user with email and password.
  */
 async function signup({ email, password, first_name, last_name, phone, country_code }) {
+  const normalizedEmail = email.toLowerCase();
+  const normalizedPhone = phone || null;
+
   // Check if email already exists
-  const existing = await query('SELECT id, is_email_verified FROM users WHERE email = $1', [email.toLowerCase()]);
+  const existing = await query(
+    'SELECT id, is_email_verified, is_phone_verified, phone FROM users WHERE email = $1',
+    [normalizedEmail]
+  );
   if (existing.rows.length > 0) {
-    if (!existing.rows[0].is_email_verified) {
-      // Check if a valid code already exists — if not, send a fresh one
+    const existingUser = existing.rows[0];
+    if (!existingUser.is_email_verified) {
+      // Update their registration data in case they changed name/phone/password
+      const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      await query(
+        `UPDATE users SET first_name = $1, last_name = $2, phone = $3, password_hash = $4,
+         country_code = $5, updated_at = NOW() WHERE email = $6`,
+        [first_name, last_name, normalizedPhone, password_hash, country_code || 'LB', normalizedEmail]
+      );
+      // Resend code only if the previous one expired
       const redis = await getRedisClient();
-      const existingCode = await redis.get(`email_verify:${email.toLowerCase()}`);
+      const existingCode = await redis.get(`email_verify:${normalizedEmail}`);
       if (!existingCode) {
-        await sendVerificationEmail(email.toLowerCase());
+        await sendVerificationEmail(normalizedEmail);
       }
       throw new AppError('Account pending verification. Please check your email for the code.', 409, 'EMAIL_UNVERIFIED');
     }
+    if (existingUser.phone && !existingUser.is_phone_verified) {
+      throw new AppError('Phone verification pending. Please sign in to complete it.', 409, 'PHONE_UNVERIFIED');
+    }
     throw new AppError('Email address is already registered', 409, 'EMAIL_EXISTS');
+  }
+
+  // Check if phone is already taken
+  if (normalizedPhone) {
+    const phoneCheck = await query(
+      'SELECT id, is_email_verified FROM users WHERE phone = $1',
+      [normalizedPhone]
+    );
+    if (phoneCheck.rows.length > 0) {
+      if (phoneCheck.rows[0].is_email_verified) {
+        throw new AppError('Phone number is already registered', 409, 'PHONE_EXISTS');
+      } else {
+        // Orphan unverified account (different email) — clean it up so this registration can proceed
+        await query('DELETE FROM users WHERE id = $1', [phoneCheck.rows[0].id]);
+      }
+    }
   }
 
   const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
@@ -58,13 +91,13 @@ async function signup({ email, password, first_name, last_name, phone, country_c
     `INSERT INTO users (email, password_hash, first_name, last_name, phone, country_code)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, email, first_name, last_name, phone, country_code, created_at`,
-    [email.toLowerCase(), password_hash, first_name, last_name, phone || null, country_code || 'LB']
+    [normalizedEmail, password_hash, first_name, last_name, normalizedPhone, country_code || 'LB']
   );
 
   const user = result.rows[0];
 
   // Send verification email
-  await sendVerificationEmail(user.email);
+  await sendVerificationEmail(normalizedEmail);
 
   logger.info('New user registered', { userId: user.id, email: user.email });
 
