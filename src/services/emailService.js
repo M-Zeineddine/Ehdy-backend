@@ -49,28 +49,21 @@ async function sendVerificationEmail(email, code) {
 }
 
 /**
- * Send password reset email with link.
+ * Send password reset email with code.
  */
-async function sendPasswordResetEmail(email, firstName, resetToken) {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://ehdy.app';
-  const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
-
+async function sendPasswordResetEmail(email, firstName, code) {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h1 style="color: #333; text-align: center;">Password Reset</h1>
+      <h1 style="color: #333; text-align: center;">Reset your password</h1>
       <p style="color: #555; font-size: 16px;">Hi ${firstName || 'there'},</p>
-      <p style="color: #555; font-size: 16px;">You requested to reset your Ehdy password. Click the button below to set a new password:</p>
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${resetLink}"
-           style="background: #6B46C1; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">
-          Reset Password
-        </a>
+      <p style="color: #555; font-size: 16px;">Use the code below to reset your Ehdy password:</p>
+      <div style="background: #f4f4f4; border-radius: 8px; padding: 30px; text-align: center; margin: 20px 0;">
+        <p style="color: #333; font-size: 14px; margin-bottom: 10px;">Your reset code is:</p>
+        <h2 style="color: #6B46C1; font-size: 42px; letter-spacing: 8px; margin: 0;">${code}</h2>
+        <p style="color: #888; font-size: 12px; margin-top: 10px;">This code expires in 1 hour.</p>
       </div>
       <p style="color: #888; font-size: 14px; text-align: center;">
-        This link expires in 1 hour. If you did not request a password reset, please ignore this email.
-      </p>
-      <p style="color: #aaa; font-size: 12px; text-align: center;">
-        Or copy this link: ${resetLink}
+        If you did not request a password reset, you can safely ignore this email.
       </p>
     </div>
   `;

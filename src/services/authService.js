@@ -290,39 +290,41 @@ async function forgotPassword(email) {
   }
 
   const user = result.rows[0];
-  const resetToken = generatePasswordResetToken();
+  const code = generateVerificationCode();
   const redis = await getRedisClient();
-  const key = `pwd_reset:${resetToken}`;
-  await redis.set(key, user.id, { EX: PASSWORD_RESET_TTL });
+  await redis.set(`pwd_reset:${email.toLowerCase()}`, code, { EX: PASSWORD_RESET_TTL });
 
-  await emailService.sendPasswordResetEmail(user.email, user.first_name, resetToken);
+  await emailService.sendPasswordResetEmail(user.email, user.first_name, code);
 
-  logger.info('Password reset email sent', { userId: user.id });
+  logger.info('Password reset code sent', { userId: user.id });
   return true;
 }
 
 /**
  * Reset password using a reset token.
  */
-async function resetPassword({ token, password }) {
+async function resetPassword({ email, code, password }) {
   const redis = await getRedisClient();
-  const key = `pwd_reset:${token}`;
-  const userId = await redis.get(key);
+  const key = `pwd_reset:${email.toLowerCase()}`;
+  const storedCode = await redis.get(key);
 
-  if (!userId) {
-    throw new AppError('Password reset token has expired or is invalid', 400, 'INVALID_RESET_TOKEN');
+  if (!storedCode) {
+    throw new AppError('Reset code has expired. Please request a new one.', 400, 'INVALID_RESET_TOKEN');
+  }
+  if (storedCode !== code) {
+    throw new AppError('Invalid reset code.', 400, 'INVALID_RESET_TOKEN');
   }
 
   const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
   await query(
-    'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-    [password_hash, userId]
+    'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE email = $2',
+    [password_hash, email.toLowerCase()]
   );
 
   await redis.del(key);
 
-  logger.info('Password reset successful', { userId });
+  logger.info('Password reset successful', { email });
   return true;
 }
 
