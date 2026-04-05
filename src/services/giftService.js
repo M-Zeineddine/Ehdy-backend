@@ -379,7 +379,7 @@ async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
     `SELECT
        gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme,
        gs.payment_status, gs.unique_share_link, gs.sent_at,
-       gs.merchant_item_id, gs.store_credit_preset_id,
+       gs.merchant_item_id,
        gs.is_claimed,
        mi.name           AS item_name,
        mi.image_url      AS item_image,
@@ -437,7 +437,7 @@ async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', rede
     `SELECT
        gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme,
        gs.payment_status, gs.unique_share_link, gs.sent_at,
-       gs.merchant_item_id, gs.store_credit_preset_id,
+       gs.merchant_item_id,
        mi.name           AS item_name,
        mi.image_url      AS item_image,
        mi.price          AS item_price,
@@ -486,7 +486,6 @@ async function claimGift(shareCode, userId) {
  */
 async function initiateGiftPayment(userId, {
   merchant_item_id,
-  store_credit_preset_id,
   custom_credit_amount,
   custom_credit_currency,
   custom_credit_merchant_id,
@@ -508,18 +507,6 @@ async function initiateGiftPayment(userId, {
     if (!r.rows.length) throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
     amount = parseFloat(r.rows[0].price);
     currency = r.rows[0].currency_code;
-  } else if (store_credit_preset_id) {
-    const r = await query(
-      'SELECT id, amount, currency_code, merchant_id FROM store_credit_presets WHERE id = $1 AND is_active = TRUE',
-      [store_credit_preset_id]
-    );
-    if (!r.rows.length) throw new AppError('Store credit preset not found', 404, 'ITEM_NOT_FOUND');
-    amount = parseFloat(r.rows[0].amount);
-    currency = r.rows[0].currency_code;
-    // Resolve merchant so all credit gifts share the same storage path
-    custom_credit_merchant_id = r.rows[0].merchant_id;
-    custom_credit_amount = amount;
-    custom_credit_currency = currency;
   } else if (custom_credit_amount != null && custom_credit_merchant_id) {
     amount = parseFloat(custom_credit_amount);
     if (isNaN(amount) || amount <= 0) throw new AppError('Invalid custom credit amount', 400, 'INVALID_AMOUNT');
@@ -531,7 +518,7 @@ async function initiateGiftPayment(userId, {
     if (!r.rows.length) throw new AppError('Merchant not found', 404, 'MERCHANT_NOT_FOUND');
     currency = custom_credit_currency || 'USD';
   } else {
-    throw new AppError('merchant_item_id, store_credit_preset_id, or custom_credit_amount+merchant_id is required', 400, 'MISSING_ITEM');
+    throw new AppError('merchant_item_id or custom_credit_amount+merchant_id is required', 400, 'MISSING_ITEM');
   }
 
   currency = currency || 'USD';
@@ -771,7 +758,6 @@ async function failGiftFromTap(tapChargeId) {
 async function saveRetryDraft(userId, data) {
   let {
     merchant_item_id,
-    store_credit_preset_id,
     custom_credit_amount,
     custom_credit_currency,
     custom_credit_merchant_id,
@@ -781,19 +767,6 @@ async function saveRetryDraft(userId, data) {
     theme,
     recipient_phone,
   } = data;
-
-  // Resolve preset to merchant + amount so drafts share the same storage path as gifts_sent
-  if (store_credit_preset_id && !custom_credit_merchant_id) {
-    const r = await query(
-      'SELECT merchant_id, amount, currency_code FROM store_credit_presets WHERE id = $1',
-      [store_credit_preset_id]
-    );
-    if (r.rows.length) {
-      custom_credit_merchant_id = r.rows[0].merchant_id;
-      custom_credit_amount = r.rows[0].amount;
-      custom_credit_currency = r.rows[0].currency_code;
-    }
-  }
 
   const result = await query(
     `INSERT INTO gift_drafts
