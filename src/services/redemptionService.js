@@ -8,40 +8,28 @@ const { getRedisClient } = require('../config/redis');
 
 const REDEMPTION_OTP_TTL = 5 * 60; // 5 minutes
 
-/**
- * Resolve the effective merchant_id and display name for a gift_instance row.
- * A gift instance belongs to a merchant via one of three paths:
- *   1. merchant_item_id  → merchant_items.merchant_id
- *   2. store_credit_preset_id → store_credit_presets.merchant_id
- *   3. custom_credit_merchant_id (direct FK)
- */
 // gift_instances has no custom_credit_amount column — use initial_balance for display
 const GIFT_INSTANCE_SELECT = `
   SELECT gi.id, gi.redemption_code, gi.current_balance, gi.initial_balance,
          gi.is_redeemed, gi.redeemed_at, gi.expiration_date, gi.item_claimed,
-         gi.currency_code, gi.merchant_item_id,
-         gi.store_credit_preset_id, gi.custom_credit_merchant_id,
+         gi.currency_code, gi.merchant_item_id, gi.custom_credit_merchant_id,
          CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
          CASE
            WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
-           WHEN gi.store_credit_preset_id IS NOT NULL
-             THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
            ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
          END AS gift_card_name,
          mi.name AS item_name,
-         COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) AS merchant_id,
-         COALESCE(m_mi.name, m_scp.name, m_custom.name) AS merchant_name,
+         COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) AS merchant_id,
+         COALESCE(m_mi.name, m_custom.name) AS merchant_name,
          wi.user_id AS wallet_owner_id,
          u.first_name AS owner_first_name,
          u.last_name  AS owner_last_name
   FROM gift_instances gi
-  LEFT JOIN merchant_items       mi       ON mi.id     = gi.merchant_item_id
-  LEFT JOIN store_credit_presets scp      ON scp.id    = gi.store_credit_preset_id
-  LEFT JOIN merchants            m_mi     ON m_mi.id   = mi.merchant_id
-  LEFT JOIN merchants            m_scp    ON m_scp.id  = scp.merchant_id
-  LEFT JOIN merchants            m_custom ON m_custom.id = gi.custom_credit_merchant_id
-  LEFT JOIN wallet_items         wi       ON wi.gift_instance_id = gi.id
-  LEFT JOIN users                u        ON u.id = wi.user_id
+  LEFT JOIN merchant_items mi       ON mi.id       = gi.merchant_item_id
+  LEFT JOIN merchants      m_mi     ON m_mi.id     = mi.merchant_id
+  LEFT JOIN merchants      m_custom ON m_custom.id = gi.custom_credit_merchant_id
+  LEFT JOIN wallet_items   wi       ON wi.gift_instance_id = gi.id
+  LEFT JOIN users          u        ON u.id = wi.user_id
 `;
 
 /**
@@ -111,21 +99,17 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
   return withTransaction(async (client) => {
     const result = await client.query(
       `SELECT gi.id, gi.current_balance, gi.is_redeemed, gi.expiration_date,
-              gi.item_claimed, gi.currency_code, gi.merchant_item_id,
-              gi.store_credit_preset_id, gi.custom_credit_merchant_id,
+              gi.item_claimed, gi.currency_code, gi.merchant_item_id, gi.custom_credit_merchant_id,
               CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
               CASE
                 WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
-                WHEN gi.store_credit_preset_id IS NOT NULL
-                  THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
                 ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
               END AS gift_card_name,
-              COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) AS merchant_id,
+              COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) AS merchant_id,
               wi.user_id AS wallet_owner_id
        FROM gift_instances gi
-       LEFT JOIN merchant_items       mi  ON mi.id  = gi.merchant_item_id
-       LEFT JOIN store_credit_presets scp ON scp.id = gi.store_credit_preset_id
-       LEFT JOIN wallet_items         wi  ON wi.gift_instance_id = gi.id
+       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+       LEFT JOIN wallet_items   wi ON wi.gift_instance_id = gi.id
        WHERE gi.redemption_code = $1
        FOR UPDATE OF gi`,
       [redemptionCode]
@@ -297,13 +281,10 @@ async function getMerchantRedemptions(merchantId, { page, limit, date_from, date
             CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
             CASE
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
-              WHEN gi.store_credit_preset_id IS NOT NULL
-                THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
               ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
             END AS gift_card_name
      FROM gift_instances gi
-     LEFT JOIN merchant_items       mi  ON mi.id  = gi.merchant_item_id
-     LEFT JOIN store_credit_presets scp ON scp.id = gi.store_credit_preset_id
+     LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
      WHERE ${whereClause}
      ORDER BY gi.redeemed_at DESC
      LIMIT $${idx++} OFFSET $${idx++}`,

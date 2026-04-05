@@ -380,20 +380,20 @@ async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
        gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme,
        gs.payment_status, gs.unique_share_link, gs.sent_at,
        gs.merchant_item_id, gs.store_credit_preset_id,
+       gs.is_claimed,
        mi.name           AS item_name,
        mi.image_url      AS item_image,
        mi.price          AS item_price,
        mi.currency_code  AS item_currency,
-       mi_m.name         AS merchant_name,
-       mi_m.logo_url     AS merchant_logo,
-       scp.amount        AS credit_amount,
-       scp.currency_code AS credit_currency,
-       scp_m.name        AS credit_merchant_name
+       COALESCE(mi_m.name, cc_m.name)        AS merchant_name,
+       COALESCE(mi_m.logo_url, cc_m.logo_url) AS merchant_logo,
+       gs.custom_credit_amount::text          AS credit_amount,
+       gs.custom_credit_currency              AS credit_currency,
+       cc_m.name                              AS credit_merchant_name
      FROM gifts_sent gs
-     LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
-     LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
-     LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
-     LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
+     LEFT JOIN merchant_items mi ON mi.id   = gs.merchant_item_id
+     LEFT JOIN merchants mi_m    ON mi_m.id = mi.merchant_id
+     LEFT JOIN merchants cc_m    ON cc_m.id = gs.custom_credit_merchant_id
      WHERE gs.sender_user_id = $1 AND gs.payment_status = 'paid'
      ORDER BY gs.sent_at ${order}
      LIMIT $2 OFFSET $3`,
@@ -442,21 +442,20 @@ async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', rede
        mi.image_url      AS item_image,
        mi.price          AS item_price,
        mi.currency_code  AS item_currency,
-       mi_m.name         AS merchant_name,
-       mi_m.logo_url     AS merchant_logo,
-       scp.amount        AS credit_amount,
-       scp.currency_code AS credit_currency,
-       scp_m.name        AS credit_merchant_name,
+       COALESCE(mi_m.name, cc_m.name)        AS merchant_name,
+       COALESCE(mi_m.logo_url, cc_m.logo_url) AS merchant_logo,
+       gs.custom_credit_amount::text          AS credit_amount,
+       gs.custom_credit_currency              AS credit_currency,
+       cc_m.name                              AS credit_merchant_name,
        u.first_name      AS sender_first_name,
        u.last_name       AS sender_last_name,
        ${statusCase} AS redemption_status
      FROM gifts_sent gs
-     LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
-     LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
-     LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
-     LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
-     LEFT JOIN users u                  ON u.id     = gs.sender_user_id
-     LEFT JOIN gift_instances gi        ON gi.gift_sent_id = gs.id
+     LEFT JOIN merchant_items mi ON mi.id   = gs.merchant_item_id
+     LEFT JOIN merchants mi_m    ON mi_m.id = mi.merchant_id
+     LEFT JOIN merchants cc_m    ON cc_m.id = gs.custom_credit_merchant_id
+     LEFT JOIN users u           ON u.id    = gs.sender_user_id
+     LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
      WHERE gs.recipient_user_id = $1 AND gs.payment_status = 'paid'
      ${statusFilter}
      ORDER BY gs.sent_at ${order}
@@ -493,17 +492,11 @@ async function initiateGiftPayment(userId, {
   custom_credit_merchant_id,
   sender_name,
   recipient_name,
-  recipient_phone: rawPhone,
+  recipient_phone,
   personal_message,
   theme,
 }) {
   const { createTapCharge } = require('./paymentService');
-
-  // Normalize recipient phone to E.164 (+961XXXXXXXX) for consistent matching
-  let recipient_phone = rawPhone ? rawPhone.trim() : null;
-  if (recipient_phone && !recipient_phone.startsWith('+')) {
-    recipient_phone = '+961' + recipient_phone.replace(/\s/g, '');
-  }
 
   // Resolve item and price
   let amount, currency;
@@ -517,12 +510,16 @@ async function initiateGiftPayment(userId, {
     currency = r.rows[0].currency_code;
   } else if (store_credit_preset_id) {
     const r = await query(
-      'SELECT id, amount, currency_code FROM store_credit_presets WHERE id = $1 AND is_active = TRUE',
+      'SELECT id, amount, currency_code, merchant_id FROM store_credit_presets WHERE id = $1 AND is_active = TRUE',
       [store_credit_preset_id]
     );
     if (!r.rows.length) throw new AppError('Store credit preset not found', 404, 'ITEM_NOT_FOUND');
     amount = parseFloat(r.rows[0].amount);
     currency = r.rows[0].currency_code;
+    // Resolve merchant so all credit gifts share the same storage path
+    custom_credit_merchant_id = r.rows[0].merchant_id;
+    custom_credit_amount = amount;
+    custom_credit_currency = currency;
   } else if (custom_credit_amount != null && custom_credit_merchant_id) {
     amount = parseFloat(custom_credit_amount);
     if (isNaN(amount) || amount <= 0) throw new AppError('Invalid custom credit amount', 400, 'INVALID_AMOUNT');
@@ -559,15 +556,13 @@ async function initiateGiftPayment(userId, {
        AND payment_status = 'pending'
        AND tap_charge_id IS NOT NULL
        AND (merchant_item_id IS NOT DISTINCT FROM $2)
-       AND (store_credit_preset_id IS NOT DISTINCT FROM $3)
-       AND (custom_credit_merchant_id IS NOT DISTINCT FROM $4)
-       AND (recipient_phone IS NOT DISTINCT FROM $5)
+       AND (custom_credit_merchant_id IS NOT DISTINCT FROM $3)
+       AND (recipient_phone IS NOT DISTINCT FROM $4)
        AND created_at > NOW() - INTERVAL '5 minutes'
      LIMIT 1`,
     [
       userId,
       merchant_item_id || null,
-      store_credit_preset_id || null,
       custom_credit_merchant_id || null,
       recipient_phone || null,
     ]
@@ -599,16 +594,15 @@ async function initiateGiftPayment(userId, {
   // Create pending gifts_sent record
   const sentResult = await query(
     `INSERT INTO gifts_sent
-       (sender_user_id, merchant_item_id, store_credit_preset_id,
+       (sender_user_id, merchant_item_id,
         custom_credit_amount, custom_credit_currency, custom_credit_merchant_id,
         sender_name, recipient_name, recipient_phone,
         personal_message, theme, unique_share_link, payment_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending')
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending')
      RETURNING id`,
     [
       userId,
       merchant_item_id || null,
-      store_credit_preset_id || null,
       custom_credit_amount ? parseFloat(custom_credit_amount) : null,
       custom_credit_amount ? (custom_credit_currency || 'USD') : null,
       custom_credit_merchant_id || null,
@@ -685,15 +679,6 @@ async function fulfillGiftFromTap(tapChargeId) {
         [gift.merchant_item_id]
       );
       if (r.rows.length) currencyCode = r.rows[0].currency_code;
-    } else if (gift.store_credit_preset_id) {
-      const r = await client.query(
-        'SELECT amount, currency_code FROM store_credit_presets WHERE id = $1',
-        [gift.store_credit_preset_id]
-      );
-      if (r.rows.length) {
-        initialBalance = parseFloat(r.rows[0].amount);
-        currencyCode = r.rows[0].currency_code;
-      }
     } else if (gift.custom_credit_amount) {
       initialBalance = parseFloat(gift.custom_credit_amount);
       currencyCode = gift.custom_credit_currency || 'USD';
@@ -709,14 +694,13 @@ async function fulfillGiftFromTap(tapChargeId) {
     // Create gift_instance with type
     const instanceResult = await client.query(
       `INSERT INTO gift_instances
-         (merchant_item_id, store_credit_preset_id, custom_credit_merchant_id,
+         (merchant_item_id, custom_credit_merchant_id,
           redemption_code, redemption_qr_code,
           current_balance, initial_balance, currency_code, expiration_date, gift_sent_id, type)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
         gift.merchant_item_id || null,
-        gift.store_credit_preset_id || null,
         gift.custom_credit_merchant_id || null,
         redemptionCode,
         qrCode,
@@ -785,7 +769,7 @@ async function failGiftFromTap(tapChargeId) {
  * Returns the new draft id.
  */
 async function saveRetryDraft(userId, data) {
-  const {
+  let {
     merchant_item_id,
     store_credit_preset_id,
     custom_credit_amount,
@@ -798,17 +782,29 @@ async function saveRetryDraft(userId, data) {
     recipient_phone,
   } = data;
 
+  // Resolve preset to merchant + amount so drafts share the same storage path as gifts_sent
+  if (store_credit_preset_id && !custom_credit_merchant_id) {
+    const r = await query(
+      'SELECT merchant_id, amount, currency_code FROM store_credit_presets WHERE id = $1',
+      [store_credit_preset_id]
+    );
+    if (r.rows.length) {
+      custom_credit_merchant_id = r.rows[0].merchant_id;
+      custom_credit_amount = r.rows[0].amount;
+      custom_credit_currency = r.rows[0].currency_code;
+    }
+  }
+
   const result = await query(
     `INSERT INTO gift_drafts
-       (user_id, merchant_item_id, store_credit_preset_id,
+       (user_id, merchant_item_id,
         custom_credit_amount, custom_credit_currency, custom_credit_merchant_id,
         sender_name, recipient_name, personal_message, theme, recipient_phone, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'draft')
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
      RETURNING id`,
     [
       userId,
       merchant_item_id || null,
-      store_credit_preset_id || null,
       custom_credit_amount ? parseFloat(custom_credit_amount) : null,
       custom_credit_amount ? (custom_credit_currency || 'USD') : null,
       custom_credit_merchant_id || null,
@@ -831,7 +827,6 @@ async function getRetryDraft(draftId, userId) {
     `SELECT
        gd.id,
        gd.merchant_item_id,
-       gd.store_credit_preset_id,
        gd.custom_credit_amount,
        gd.custom_credit_currency,
        gd.custom_credit_merchant_id,
@@ -840,19 +835,18 @@ async function getRetryDraft(draftId, userId) {
        gd.personal_message,
        gd.theme,
        gd.recipient_phone,
-       COALESCE(mi.name, (scp.amount::text || ' ' || scp.currency_code), 'Store Credit') AS item_name,
-       mi.description                                                                      AS item_description,
-       COALESCE(mi.price, scp.amount, gd.custom_credit_amount)                           AS item_price,
-       COALESCE(mi.currency_code, scp.currency_code, gd.custom_credit_currency)          AS item_currency,
-       mi.image_url                                                                        AS item_image,
-       m.id                                                                                AS merchant_id,
-       m.name                                                                              AS merchant_name,
-       m.logo_url                                                                          AS merchant_logo,
-       (gd.store_credit_preset_id IS NOT NULL OR gd.custom_credit_amount IS NOT NULL)    AS is_credit
+       COALESCE(mi.name, 'Store Credit')              AS item_name,
+       mi.description                                  AS item_description,
+       COALESCE(mi.price, gd.custom_credit_amount)    AS item_price,
+       COALESCE(mi.currency_code, gd.custom_credit_currency) AS item_currency,
+       mi.image_url                                    AS item_image,
+       m.id                                            AS merchant_id,
+       m.name                                          AS merchant_name,
+       m.logo_url                                      AS merchant_logo,
+       (gd.custom_credit_amount IS NOT NULL)           AS is_credit
      FROM gift_drafts gd
      LEFT JOIN merchant_items mi ON mi.id = gd.merchant_item_id
-     LEFT JOIN store_credit_presets scp ON scp.id = gd.store_credit_preset_id
-     LEFT JOIN merchants m ON m.id = COALESCE(mi.merchant_id, scp.merchant_id, gd.custom_credit_merchant_id)
+     LEFT JOIN merchants m ON m.id = COALESCE(mi.merchant_id, gd.custom_credit_merchant_id)
      WHERE gd.id = $1 AND gd.user_id = $2`,
     [draftId, userId]
   );

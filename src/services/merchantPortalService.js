@@ -80,11 +80,9 @@ async function getMerchantDashboard(merchantId) {
   const startOfDay = `${today} 00:00:00`;
   const endOfDay = `${today} 23:59:59`;
 
-  // Helper: filter gift_instances by merchant via all three FK paths
-  const merchantFilter = `COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) = $3`;
+  const merchantFilter = `COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $3`;
   const merchantJoins = `
-    LEFT JOIN merchant_items       mi  ON mi.id  = gi.merchant_item_id
-    LEFT JOIN store_credit_presets scp ON scp.id = gi.store_credit_preset_id
+    LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
   `;
 
   // Today's stats
@@ -118,14 +116,12 @@ async function getMerchantDashboard(merchantId) {
     `SELECT gi.redemption_code, gi.redeemed_at, gi.redeemed_amount, gi.currency_code,
             CASE
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
-              WHEN gi.store_credit_preset_id IS NOT NULL
-                THEN CONCAT(scp.amount::text, ' ', scp.currency_code, ' Store Credit')
               ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
             END AS gift_card_name,
             CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type
      FROM gift_instances gi
      ${merchantJoins}
-     WHERE COALESCE(mi.merchant_id, scp.merchant_id, gi.custom_credit_merchant_id) = $1
+     WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
        AND gi.is_redeemed = TRUE
      ORDER BY gi.redeemed_at DESC
      LIMIT 10`,

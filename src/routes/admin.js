@@ -616,9 +616,7 @@ router.get('/gifts', async (req, res, next) => {
       LEFT JOIN users u ON u.id = gs.sender_user_id
       LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-      LEFT JOIN store_credit_presets scp ON scp.id = gi.store_credit_preset_id
       LEFT JOIN merchants m_mi   ON m_mi.id  = mi.merchant_id
-      LEFT JOIN merchants m_scp  ON m_scp.id = scp.merchant_id
       LEFT JOIN merchants m_cust ON m_cust.id = gi.custom_credit_merchant_id
       ${whereClause}
       GROUP BY gs.id, u.email

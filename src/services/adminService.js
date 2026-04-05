@@ -211,13 +211,12 @@ async function getDashboard() {
            gs.sent_at,
            COALESCE(sender.first_name || ' ' || sender.last_name, sender.email) AS sender_label,
            COALESCE(m_item.name, m_credit.name) AS merchant_name,
-           COALESCE(mi.name, CONCAT(scp.amount::text, ' ', scp.currency_code)) AS gift_label
+           COALESCE(mi.name, CONCAT(gs.custom_credit_amount::text, ' ', gs.custom_credit_currency)) AS gift_label
          FROM gifts_sent gs
          LEFT JOIN users sender ON sender.id = gs.sender_user_id
          LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
-         LEFT JOIN store_credit_presets scp ON scp.id = gs.store_credit_preset_id
          LEFT JOIN merchants m_item ON m_item.id = mi.merchant_id
-         LEFT JOIN merchants m_credit ON m_credit.id = scp.merchant_id
+         LEFT JOIN merchants m_credit ON m_credit.id = gs.custom_credit_merchant_id
          ORDER BY gs.sent_at DESC
          LIMIT 8`
       ),
@@ -228,9 +227,8 @@ async function getDashboard() {
            COUNT(*)::int AS gift_count
          FROM gifts_sent gs
          LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
-         LEFT JOIN store_credit_presets scp ON scp.id = gs.store_credit_preset_id
          LEFT JOIN merchants m_item ON m_item.id = mi.merchant_id
-         LEFT JOIN merchants m_credit ON m_credit.id = scp.merchant_id
+         LEFT JOIN merchants m_credit ON m_credit.id = gs.custom_credit_merchant_id
          WHERE gs.payment_status = 'paid'
          GROUP BY COALESCE(m_item.id, m_credit.id), COALESCE(m_item.name, m_credit.name)
          ORDER BY gift_count DESC, merchant_name ASC
@@ -443,7 +441,7 @@ async function listMerchants({ page, limit, search, status }) {
          LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
          LEFT JOIN store_credit_presets scp ON scp.id = gs.store_credit_preset_id
          WHERE gs.payment_status = 'paid'
-           AND COALESCE(mi.merchant_id, scp.merchant_id) = m.id
+           AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = m.id
        ) AS paid_gift_count
      FROM merchants m
      JOIN categories c ON c.id = m.category_id
@@ -752,7 +750,10 @@ async function listStoreCredits({ page, limit, search, status, merchant_id }) {
        (
          SELECT COUNT(*)::int
          FROM gifts_sent gs
-         WHERE gs.payment_status = 'paid' AND gs.store_credit_preset_id = scp.id
+         WHERE gs.payment_status = 'paid'
+           AND gs.custom_credit_merchant_id = scp.merchant_id
+           AND gs.custom_credit_amount = scp.amount
+           AND gs.custom_credit_currency = scp.currency_code
        ) AS paid_gift_count
      FROM store_credit_presets scp
      JOIN merchants m ON m.id = scp.merchant_id
@@ -896,9 +897,8 @@ async function listGifts({ page, limit, search, payment_status }) {
      FROM gifts_sent gs
      LEFT JOIN users sender ON sender.id = gs.sender_user_id
      LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
-     LEFT JOIN store_credit_presets scp ON scp.id = gs.store_credit_preset_id
      LEFT JOIN merchants m_item ON m_item.id = mi.merchant_id
-     LEFT JOIN merchants m_credit ON m_credit.id = scp.merchant_id
+     LEFT JOIN merchants m_credit ON m_credit.id = gs.custom_credit_merchant_id
      ${whereClause}`,
     params
   );
@@ -922,7 +922,7 @@ async function listGifts({ page, limit, search, payment_status }) {
        COALESCE(sender.first_name || ' ' || sender.last_name, sender.email) AS sender_label,
        COALESCE(recipient.first_name || ' ' || recipient.last_name, recipient.email) AS recipient_label,
        COALESCE(m_item.name, m_credit.name) AS merchant_name,
-       COALESCE(mi.name, CONCAT(scp.amount::text, ' ', scp.currency_code)) AS gift_label,
+       COALESCE(mi.name, CONCAT(gs.custom_credit_amount::text, ' ', gs.custom_credit_currency)) AS gift_label,
        gi.redemption_code,
        gi.current_balance,
        gi.is_redeemed
@@ -930,9 +930,8 @@ async function listGifts({ page, limit, search, payment_status }) {
      LEFT JOIN users sender ON sender.id = gs.sender_user_id
      LEFT JOIN users recipient ON recipient.id = gs.recipient_user_id
      LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
-     LEFT JOIN store_credit_presets scp ON scp.id = gs.store_credit_preset_id
      LEFT JOIN merchants m_item ON m_item.id = mi.merchant_id
-     LEFT JOIN merchants m_credit ON m_credit.id = scp.merchant_id
+     LEFT JOIN merchants m_credit ON m_credit.id = gs.custom_credit_merchant_id
      LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
      ${whereClause}
      ORDER BY gs.sent_at DESC

@@ -759,7 +759,7 @@ router.get('/:shareCode', async (req, res) => {
     const result = await query(
       `SELECT
          gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme, gs.payment_status,
-         gs.merchant_item_id, gs.store_credit_preset_id, gs.custom_credit_merchant_id,
+         gs.merchant_item_id, gs.custom_credit_merchant_id,
          gs.custom_credit_amount, gs.custom_credit_currency,
          mi.name          AS item_name,
          mi.price         AS item_price,
@@ -767,20 +767,14 @@ router.get('/:shareCode', async (req, res) => {
          mi.image_url     AS item_image,
          mi_m.id          AS item_merchant_id,
          mi_m.name        AS item_merchant,
-         scp.amount       AS credit_amount,
-         scp.currency_code AS credit_currency,
-         scp_m.id         AS credit_merchant_id,
-         scp_m.name       AS credit_merchant,
-         m_custom.id      AS custom_merchant_id,
-         m_custom.name    AS custom_merchant,
+         cc_m.id          AS credit_merchant_id,
+         cc_m.name        AS credit_merchant,
          gi.redemption_code, gi.redemption_qr_code
        FROM gifts_sent gs
-       LEFT JOIN merchant_items mi        ON mi.id    = gs.merchant_item_id
-       LEFT JOIN merchants mi_m           ON mi_m.id  = mi.merchant_id
-       LEFT JOIN store_credit_presets scp ON scp.id   = gs.store_credit_preset_id
-       LEFT JOIN merchants scp_m          ON scp_m.id = scp.merchant_id
-       LEFT JOIN merchants m_custom       ON m_custom.id = gs.custom_credit_merchant_id
-       LEFT JOIN gift_instances gi        ON gi.gift_sent_id = gs.id
+       LEFT JOIN merchant_items mi  ON mi.id    = gs.merchant_item_id
+       LEFT JOIN merchants mi_m     ON mi_m.id  = mi.merchant_id
+       LEFT JOIN merchants cc_m     ON cc_m.id  = gs.custom_credit_merchant_id
+       LEFT JOIN gift_instances gi  ON gi.gift_sent_id = gs.id
        WHERE gs.unique_share_link = $1
        LIMIT 1`,
       [shareCode]
@@ -796,17 +790,11 @@ router.get('/:shareCode', async (req, res) => {
       return res.status(404).send(renderNotFound());
     }
 
-    const isPresetCredit = !!row.store_credit_preset_id;
-    const isCustomCredit = !!row.custom_credit_merchant_id;
-    const isCredit = isPresetCredit || isCustomCredit;
+    const isCredit = !!row.custom_credit_merchant_id;
 
-    const merchantName = isPresetCredit ? row.credit_merchant
-      : isCustomCredit ? row.custom_merchant
-      : row.item_merchant;
+    const merchantName = isCredit ? row.credit_merchant : row.item_merchant;
 
-    const itemName = isPresetCredit
-      ? `${row.credit_currency} ${row.credit_amount} Store Credit`
-      : isCustomCredit
+    const itemName = isCredit
       ? `${row.custom_credit_currency || 'USD'} ${row.custom_credit_amount} Store Credit`
       : (row.item_name || 'Gift');
 
