@@ -135,22 +135,15 @@ async function verifyEmail({ email, code }) {
     throw new AppError('Invalid verification code', 400, 'INVALID_CODE');
   }
 
-  const userResult = await query(
+  await query(
     `UPDATE users SET is_email_verified = TRUE, email_verified_at = NOW(), updated_at = NOW()
-     WHERE email = $1
-     RETURNING id, phone`,
+     WHERE email = $1`,
     [email.toLowerCase()]
   );
 
   await redis.del(key);
 
   logger.info('Email verified', { email });
-
-  // Claim any pending gifts that were sent to this user's phone number
-  const user = userResult.rows[0];
-  if (user?.phone) {
-    await claimPendingGiftsForPhone(user.id, user.phone);
-  }
 
   return true;
 }
@@ -161,6 +154,8 @@ async function verifyEmail({ email, code }) {
  * to their wallet automatically.
  */
 async function claimPendingGiftsForPhone(userId, phone) {
+  logger.info('Claiming pending gifts for phone', { userId, phone });
+
   const pending = await query(
     `SELECT gs.id, gi.id AS instance_id, gs.sender_user_id
      FROM gifts_sent gs
@@ -171,6 +166,8 @@ async function claimPendingGiftsForPhone(userId, phone) {
 `,
     [phone]
   );
+
+  logger.info('Pending gifts found', { userId, phone, count: pending.rows.length });
 
   if (!pending.rows.length) return;
 
@@ -415,12 +412,19 @@ async function verifyPhoneOtp(phone, code) {
   if (stored !== code) throw new AppError('Invalid verification code.', 400, 'INVALID_CODE');
 
   await redis.del(`phone_otp:${phone}`);
-  await query(
-    `UPDATE users SET is_phone_verified = TRUE, phone_verified_at = NOW(), updated_at = NOW() WHERE phone = $1`,
+  const result = await query(
+    `UPDATE users SET is_phone_verified = TRUE, phone_verified_at = NOW(), updated_at = NOW()
+     WHERE phone = $1 RETURNING id`,
     [phone]
   );
 
   logger.info('Phone verified', { phone });
+
+  // Claim any gifts sent to this phone that weren't picked up at email verification
+  const userId = result.rows[0]?.id;
+  if (userId) {
+    await claimPendingGiftsForPhone(userId, phone);
+  }
 }
 
 module.exports = {
