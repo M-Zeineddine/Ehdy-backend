@@ -493,11 +493,17 @@ async function initiateGiftPayment(userId, {
   custom_credit_merchant_id,
   sender_name,
   recipient_name,
-  recipient_phone,
+  recipient_phone: rawPhone,
   personal_message,
   theme,
 }) {
   const { createTapCharge } = require('./paymentService');
+
+  // Normalize recipient phone to E.164 (+961XXXXXXXX) for consistent matching
+  let recipient_phone = rawPhone ? rawPhone.trim() : null;
+  if (recipient_phone && !recipient_phone.startsWith('+')) {
+    recipient_phone = '+961' + recipient_phone.replace(/\s/g, '');
+  }
 
   // Resolve item and price
   let amount, currency;

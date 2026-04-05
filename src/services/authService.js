@@ -156,15 +156,16 @@ async function verifyEmail({ email, code }) {
 async function claimPendingGiftsForPhone(userId, phone) {
   logger.info('Claiming pending gifts for phone', { userId, phone });
 
+  // Match on full E.164 OR local number (for gifts sent before phone normalization was added)
+  const localPhone = phone.startsWith('+961') ? phone.slice(4) : phone;
   const pending = await query(
     `SELECT gs.id, gi.id AS instance_id, gs.sender_user_id
      FROM gifts_sent gs
      JOIN gift_instances gi ON gi.gift_sent_id = gs.id
-     WHERE gs.recipient_phone = $1
+     WHERE (gs.recipient_phone = $1 OR gs.recipient_phone = $2)
        AND gs.payment_status = 'paid'
-       AND gs.recipient_user_id IS NULL
-`,
-    [phone]
+       AND gs.recipient_user_id IS NULL`,
+    [phone, localPhone]
   );
 
   logger.info('Pending gifts found', { userId, phone, count: pending.rows.length });
