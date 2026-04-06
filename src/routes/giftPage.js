@@ -805,9 +805,7 @@ router.get('/:shareCode', async (req, res) => {
     const items = [{ imageUrl, merchantName, itemName, details: itemDetails }];
 
     // Fetch branches for the merchant
-    const merchantId = isPresetCredit ? row.credit_merchant_id
-      : isCustomCredit ? row.custom_merchant_id
-      : row.item_merchant_id;
+    const merchantId = isCredit ? row.credit_merchant_id : row.item_merchant_id;
     let branches = [];
     if (merchantId) {
       const branchResult = await query(
