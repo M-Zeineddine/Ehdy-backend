@@ -380,7 +380,6 @@ async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
        gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme,
        gs.payment_status, gs.unique_share_link, gs.sent_at,
        gs.merchant_item_id,
-       gs.is_claimed,
        mi.name           AS item_name,
        mi.image_url      AS item_image,
        mi.price          AS item_price,
