@@ -76,7 +76,7 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g. mobile apps, curl)
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: Origin ${origin} not allowed`));
@@ -89,8 +89,8 @@ app.use(
 );
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '200kb' }));
+app.use(express.urlencoded({ extended: true, limit: '200kb' }));
 
 // ─── HTTP Logging ─────────────────────────────────────────────────────────────
 app.use(httpLogger);
@@ -129,7 +129,7 @@ app.use('/v1/notifications', notificationRoutes);
 app.use('/v1/merchant', merchantPortalRoutes);
 app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/webhooks', webhookRoutes);
-app.use('/gift', giftPageRoutes);
+app.use('/gift', generalLimiter, giftPageRoutes);
 app.use('/v1/admin', adminRoutes);
 
 // ─── CMS Static Files ─────────────────────────────────────────────────────────

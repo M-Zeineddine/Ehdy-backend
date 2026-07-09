@@ -7,9 +7,12 @@ const { query } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const { getVisitAnalytics } = require('../services/merchantService');
 const { authenticateAdmin } = require('../middleware/auth');
+const { authLimiter } = require('../middleware/rateLimiter');
+const { validate } = require('../middleware/validation');
+const { adminLoginValidation } = require('../utils/validators');
 
 // ─── Admin Login ───────────────────────────────────────────────────────────────
-router.post('/login', async (req, res, next) => {
+router.post('/login', authLimiter, adminLoginValidation, validate, async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
@@ -841,6 +844,9 @@ router.get('/audit-logs', async (req, res, next) => {
 // ─── Admin Users Management ───────────────────────────────────────────────────
 router.get('/admins', async (req, res, next) => {
   try {
+    if (req.admin.role !== 'superadmin') {
+      return next(new AppError('Only superadmin can view admin users', 403, 'FORBIDDEN'));
+    }
     const result = await query(
       'SELECT id, email, first_name, last_name, role, is_active, last_login_at, created_at FROM admin_users ORDER BY created_at'
     );
