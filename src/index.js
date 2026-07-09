@@ -10,6 +10,7 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 const cors = require('cors');
 
+const { validateEnv } = require('./config/validateEnv');
 const httpLogger = require('./middleware/logger');
 const { generalLimiter } = require('./middleware/rateLimiter');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -165,6 +166,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 async function startServer() {
   try {
+    // Validate environment before doing anything else
+    validateEnv();
+
     // Test database connection
     const pool = require('./config/database');
     await pool.query('SELECT 1');
