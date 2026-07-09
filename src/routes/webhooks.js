@@ -52,59 +52,85 @@ function verifyTapSignature(charge) {
 }
 
 /**
+ * Process a Tap charge payload and record the outcome on its payment_webhooks
+ * row. Exported so the reconciliation job can re-drive unprocessed rows.
+ * Only genuine exceptions (transient failures) leave processed = false; a
+ * rejected signature or an unhandled status is terminal (processed = true).
+ */
+async function processTapWebhook(webhookRowId, charge) {
+  const chargeId = charge?.id;
+  const status = charge?.status;
+  let processed = false;
+  let errorMessage = null;
+
+  try {
+    if (!chargeId) {
+      logger.warn('Tap webhook missing charge id', { webhookRowId });
+      errorMessage = 'missing charge id';
+      processed = true; // nothing to retry
+    } else if (!verifyTapSignature(charge)) {
+      logger.warn('Tap webhook signature verification failed', { chargeId });
+      errorMessage = 'signature verification failed';
+      processed = true; // rejected, not retryable
+    } else {
+      logger.info('Tap webhook processing', { chargeId, status });
+      if (status === 'CAPTURED') {
+        await fulfillGiftFromTap(chargeId);
+      } else if (status === 'FAILED' || status === 'CANCELLED') {
+        await failGiftFromTap(chargeId);
+      } else {
+        logger.debug('Unhandled Tap charge status', { chargeId, status });
+      }
+      processed = true;
+    }
+  } catch (err) {
+    // Transient failure — leave processed = false so reconciliation retries.
+    errorMessage = err.message;
+    logger.error('Error processing Tap webhook', { error: err.message, stack: err.stack });
+  }
+
+  if (webhookRowId) {
+    try {
+      await query(
+        `UPDATE payment_webhooks SET processed = $1, error_message = $2 WHERE id = $3`,
+        [processed, errorMessage, webhookRowId]
+      );
+    } catch (logErr) {
+      logger.error('Failed to update payment webhook status', { error: logErr.message });
+    }
+  }
+}
+
+/**
  * Tap Payments webhook handler.
  * Tap POSTs the full charge object to this URL on status changes.
  */
 const tapWebhook = async (req, res) => {
+  const charge = req.body;
+  const chargeId = charge?.id || null;
+  const status = charge?.status || null;
+
+  // Persist the raw payload BEFORE acknowledging, so a crash mid-processing
+  // never loses the event — the reconciliation job re-drives unprocessed rows.
+  let webhookRowId = null;
+  try {
+    const ins = await query(
+      `INSERT INTO payment_webhooks (provider, charge_id, status, raw_payload, processed)
+       VALUES ('tap', $1, $2, $3, FALSE) RETURNING id`,
+      [chargeId, status, JSON.stringify(charge)]
+    );
+    webhookRowId = ins.rows[0].id;
+  } catch (logErr) {
+    logger.error('Failed to persist payment webhook', { error: logErr.message });
+  }
+
   // Acknowledge immediately — Tap expects a 200 quickly
   res.status(200).json({ received: true });
 
-  setImmediate(async () => {
-    const charge = req.body;
-    const chargeId = charge?.id;
-    const status = charge?.status;
-    let processed = false;
-    let errorMessage = null;
-
-    try {
-      if (!chargeId) {
-        logger.warn('Tap webhook missing charge id', { body: req.body });
-        return;
-      }
-
-      if (!verifyTapSignature(charge)) {
-        logger.warn('Tap webhook signature verification failed', { chargeId });
-        return;
-      }
-
-      logger.info('Tap webhook received', { chargeId, status });
-
-      if (status === 'CAPTURED') {
-        await fulfillGiftFromTap(chargeId);
-        processed = true;
-      } else if (status === 'FAILED' || status === 'CANCELLED') {
-        await failGiftFromTap(chargeId);
-        processed = true;
-      } else {
-        logger.debug('Unhandled Tap charge status', { chargeId, status });
-      }
-    } catch (err) {
-      errorMessage = err.message;
-      logger.error('Error processing Tap webhook', { error: err.message, stack: err.stack });
-    }
-
-    try {
-      await query(
-        `INSERT INTO payment_webhooks (provider, charge_id, status, raw_payload, processed, error_message)
-         VALUES ('tap', $1, $2, $3, $4, $5)`,
-        [chargeId || null, status || null, JSON.stringify(charge), processed, errorMessage]
-      );
-    } catch (logErr) {
-      logger.error('Failed to log payment webhook', { error: logErr.message });
-    }
-  });
+  setImmediate(() => processTapWebhook(webhookRowId, charge));
 };
 
 router.post('/tap', tapWebhook);
 
+router.processTapWebhook = processTapWebhook;
 module.exports = router;

@@ -641,9 +641,11 @@ async function initiateGiftPayment(userId, {
  */
 async function fulfillGiftFromTap(tapChargeId) {
   return withTransaction(async (client) => {
-    // Find the pending gift
+    // Find the pending gift. FOR UPDATE serializes concurrent webhook/confirm
+    // calls: the first locks and flips to 'paid', the second re-reads and no
+    // longer matches payment_status='pending', so fulfilment runs exactly once.
     const giftResult = await client.query(
-      `SELECT * FROM gifts_sent WHERE tap_charge_id = $1 AND payment_status = 'pending'`,
+      `SELECT * FROM gifts_sent WHERE tap_charge_id = $1 AND payment_status = 'pending' FOR UPDATE`,
       [tapChargeId]
     );
 

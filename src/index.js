@@ -190,8 +190,10 @@ async function startServer() {
       try {
         const { scheduleCheckExpiringGifts } = require('./jobs/checkExpiringGifts');
         const { scheduleSyncMerchantBalances } = require('./jobs/syncMerchantBalances');
+        const { scheduleReconcileWebhooks } = require('./jobs/reconcileWebhooks');
         scheduleCheckExpiringGifts();
         scheduleSyncMerchantBalances();
+        scheduleReconcileWebhooks();
         logger.info('Background jobs scheduled');
       } catch (jobErr) {
         logger.warn('Failed to schedule background jobs', { error: jobErr.message });
