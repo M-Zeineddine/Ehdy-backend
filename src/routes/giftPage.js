@@ -86,6 +86,19 @@ function escapeHtml(str) {
 }
 
 /**
+ * Escape a JSON string for safe embedding inside an inline <script> block.
+ * Prevents </script> breakout and JS line-separator injection.
+ */
+function escapeJsonForScript(json) {
+  return json
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+/**
  * Renders a single gift item card.
  * Accepts an array of items so bundle gifts are future-proof —
  * just pass multiple entries and they render as a stacked list.
@@ -129,14 +142,14 @@ function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientNa
   const googleMapsUrl = hasMap
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapSearchQuery)}`
     : '';
-  const branchesJson = hasMap ? JSON.stringify(mapBranches.map(b => ({
+  const branchesJson = hasMap ? escapeJsonForScript(JSON.stringify(mapBranches.map(b => ({
     lat: parseFloat(b.latitude),
     lng: parseFloat(b.longitude),
     name: b.name || '',
     address: b.address || '',
     city: b.city || '',
     mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${parseFloat(b.latitude)},${parseFloat(b.longitude)}`)}`,
-  }))) : '[]';
+  })))) : '[]';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -583,7 +596,7 @@ function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientNa
         </div>
         ${qrUrl ? `
         <div class="qr-wrap">
-          <img src="${qrUrl}" alt="QR Code" />
+          <img src="${escapeHtml(qrUrl)}" alt="QR Code" />
           <p class="qr-hint">Scan at the counter to redeem</p>
         </div>` : ''}
       </div>` : ''}
