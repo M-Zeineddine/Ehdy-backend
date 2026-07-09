@@ -14,7 +14,11 @@ const logger = require('../utils/logger');
  */
 function verifyTapSignature(charge) {
   const secret = process.env.TAP_SECRET_KEY;
-  if (!secret) return true; // skip if key not configured (dev only)
+  if (!secret) {
+    // Fail closed: without a key we cannot verify the signature.
+    logger.error('Tap webhook rejected: TAP_SECRET_KEY is not configured');
+    return false;
+  }
 
   const hashstring = charge?.hashstring;
   if (!hashstring) {
@@ -33,6 +37,13 @@ function verifyTapSignature(charge) {
     .createHmac('sha256', secret)
     .update(payload)
     .digest('hex');
+
+  // Guard hashstring format before Buffer/timingSafeEqual: must be hex of the
+  // same length as the digest, otherwise reject without relying on a throw.
+  if (typeof hashstring !== 'string' || !/^[0-9a-fA-F]+$/.test(hashstring) || hashstring.length !== expected.length) {
+    logger.warn('Tap webhook hashstring malformed or wrong length');
+    return false;
+  }
 
   return crypto.timingSafeEqual(
     Buffer.from(hashstring, 'hex'),
