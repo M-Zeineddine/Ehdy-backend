@@ -1,8 +1,6 @@
 -- ============================================================================
--- DRAFT — A7: draft-keyed payment idempotency (schema half of double-charge fix)
--- STOP-GATE: review before promoting to src/migrations/ and running migrate:up.
--- Lives in migrations/drafts/ so the runner does NOT auto-sweep it.
--- The runner wraps each file in a single BEGIN/COMMIT.
+-- Migration 018 (A7): draft-keyed payment idempotency (schema half of the
+-- double-charge fix). The runner wraps this file in a single BEGIN/COMMIT.
 --
 -- INERT UNTIL THE CLIENT SENDS gift_draft_id: the partial unique index below
 -- only constrains rows where gift_draft_id IS NOT NULL. Until the app passes a
