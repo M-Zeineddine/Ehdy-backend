@@ -69,16 +69,6 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
-const socialLogin = async (req, res, next) => {
-  try {
-    const { provider, id_token, email, first_name, last_name } = req.body;
-    const result = await authService.socialLogin({ provider, id_token, email, first_name, last_name });
-    return successResponse(res, result, 'Signed in successfully.');
-  } catch (err) {
-    return next(err);
-  }
-};
-
 const sendPhoneOtp = async (req, res, next) => {
   try {
     const { phone } = req.body;
@@ -120,7 +110,6 @@ module.exports = {
   refreshToken,
   forgotPassword,
   resetPassword,
-  socialLogin,
   sendPhoneOtp,
   verifyPhoneOtp,
 };

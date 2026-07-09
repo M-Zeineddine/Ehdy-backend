@@ -41,11 +41,6 @@ const resetPasswordValidation = [
     .withMessage('Password must be at least 8 characters'),
 ];
 
-const socialLoginValidation = [
-  body('provider').isIn(['google', 'apple']).withMessage('Provider must be google or apple'),
-  body('id_token').notEmpty().withMessage('ID token is required'),
-];
-
 // Admin validators
 const adminLoginValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -255,7 +250,6 @@ module.exports = {
   verifyEmailValidation,
   forgotPasswordValidation,
   resetPasswordValidation,
-  socialLoginValidation,
   updateUserValidation,
   changePasswordValidation,
   createDraftValidation,
