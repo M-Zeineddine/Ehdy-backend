@@ -493,6 +493,7 @@ async function initiateGiftPayment(userId, {
   recipient_phone,
   personal_message,
   theme,
+  gift_draft_id,
 }) {
   const { createTapCharge } = require('./paymentService');
 
@@ -504,7 +505,12 @@ async function initiateGiftPayment(userId, {
       [merchant_item_id]
     );
     if (!r.rows.length) throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
+    // merchant_items.price is nullable; an active item can have a null price.
+    // Guard so a null/NaN price never becomes a NaN-amount Tap charge.
     amount = parseFloat(r.rows[0].price);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new AppError('This item is not available for purchase', 400, 'INVALID_ITEM_PRICE');
+    }
     currency = r.rows[0].currency_code;
   } else if (custom_credit_amount != null && custom_credit_merchant_id) {
     amount = parseFloat(custom_credit_amount);
@@ -532,6 +538,39 @@ async function initiateGiftPayment(userId, {
   // Prevent sending a gift to yourself
   if (recipient_phone && user.phone && user.phone === recipient_phone) {
     throw new AppError('You cannot send a gift to yourself', 400, 'SELF_SEND_NOT_ALLOWED');
+  }
+
+  // Draft-keyed idempotency: at most one pending charge per draft (enforced by
+  // the partial unique index gifts_sent_one_pending_per_draft). If a live
+  // pending charge already exists for this draft, return it rather than
+  // creating a second Tap charge.
+  if (gift_draft_id) {
+    const existingDraft = await query(
+      `SELECT id, tap_charge_id, unique_share_link FROM gifts_sent
+       WHERE gift_draft_id = $1 AND payment_status = 'pending' AND tap_charge_id IS NOT NULL
+       LIMIT 1`,
+      [gift_draft_id]
+    );
+    if (existingDraft.rows.length) {
+      const existing = existingDraft.rows[0];
+      const { getTapCharge } = require('./paymentService');
+      try {
+        const charge = await getTapCharge(existing.tap_charge_id);
+        if (charge?.transaction?.url) {
+          logger.info('Returning existing pending gift for draft idempotency', { giftSentId: existing.id, giftDraftId: gift_draft_id });
+          return {
+            gift_sent_id: existing.id,
+            tap_transaction_url: charge.transaction.url,
+            unique_share_link: existing.unique_share_link,
+            amount,
+            currency,
+          };
+        }
+      } catch (_) {
+        // Tap charge no longer resolvable — fall through; the INSERT's unique
+        // guard (23505) below handles the still-pending row.
+      }
+    }
   }
 
   // Idempotency: return existing pending record if the same user is sending
@@ -577,31 +616,66 @@ async function initiateGiftPayment(userId, {
   // Generate share link now so it's ready when the recipient gets the link
   const shareCode = await generateUniqueShareCode();
 
-  // Create pending gifts_sent record
-  const sentResult = await query(
-    `INSERT INTO gifts_sent
-       (sender_user_id, merchant_item_id,
-        custom_credit_amount, custom_credit_currency, custom_credit_merchant_id,
-        sender_name, recipient_name, recipient_phone,
-        personal_message, theme, unique_share_link, payment_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending')
-     RETURNING id`,
-    [
-      userId,
-      merchant_item_id || null,
-      custom_credit_amount ? parseFloat(custom_credit_amount) : null,
-      custom_credit_amount ? (custom_credit_currency || 'USD') : null,
-      custom_credit_merchant_id || null,
-      sender_name || null,
-      recipient_name || null,
-      recipient_phone || null,
-      personal_message || null,
-      theme || null,
-      shareCode,
-    ]
-  );
-
-  const giftSentId = sentResult.rows[0].id;
+  // Create pending gifts_sent record. The partial unique index enforces one
+  // pending charge per draft; a concurrent/duplicate attempt raises 23505,
+  // which we translate into the idempotent response (or a 409 if its charge is
+  // no longer resolvable).
+  let giftSentId;
+  try {
+    const sentResult = await query(
+      `INSERT INTO gifts_sent
+         (sender_user_id, merchant_item_id,
+          custom_credit_amount, custom_credit_currency, custom_credit_merchant_id,
+          sender_name, recipient_name, recipient_phone,
+          personal_message, theme, unique_share_link, gift_draft_id, payment_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending')
+       RETURNING id`,
+      [
+        userId,
+        merchant_item_id || null,
+        custom_credit_amount ? parseFloat(custom_credit_amount) : null,
+        custom_credit_amount ? (custom_credit_currency || 'USD') : null,
+        custom_credit_merchant_id || null,
+        sender_name || null,
+        recipient_name || null,
+        recipient_phone || null,
+        personal_message || null,
+        theme || null,
+        shareCode,
+        gift_draft_id || null,
+      ]
+    );
+    giftSentId = sentResult.rows[0].id;
+  } catch (err) {
+    if (err.code === '23505' && gift_draft_id) {
+      // A pending charge for this draft already exists (race, or a prior attempt
+      // whose Tap session is still open). Return it idempotently.
+      const existing = await query(
+        `SELECT id, tap_charge_id, unique_share_link FROM gifts_sent
+         WHERE gift_draft_id = $1 AND payment_status = 'pending' LIMIT 1`,
+        [gift_draft_id]
+      );
+      if (existing.rows.length) {
+        const row = existing.rows[0];
+        const { getTapCharge } = require('./paymentService');
+        try {
+          const charge = await getTapCharge(row.tap_charge_id);
+          if (charge?.transaction?.url) {
+            logger.info('Draft idempotency backstop (23505) returned existing pending gift', { giftSentId: row.id, giftDraftId: gift_draft_id });
+            return {
+              gift_sent_id: row.id,
+              tap_transaction_url: charge.transaction.url,
+              unique_share_link: row.unique_share_link,
+              amount,
+              currency,
+            };
+          }
+        } catch (_) { /* fall through to 409 */ }
+        throw new AppError('A payment is already in progress for this gift. Please try again in a moment.', 409, 'PAYMENT_IN_PROGRESS');
+      }
+    }
+    throw err;
+  }
 
   // Build webhook + redirect URLs
   const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3000}`;
@@ -641,11 +715,35 @@ async function initiateGiftPayment(userId, {
  */
 async function fulfillGiftFromTap(tapChargeId) {
   return withTransaction(async (client) => {
-    // Find the pending gift. FOR UPDATE serializes concurrent webhook/confirm
-    // calls: the first locks and flips to 'paid', the second re-reads and no
-    // longer matches payment_status='pending', so fulfilment runs exactly once.
+    // Find the gift to fulfil. FOR UPDATE serializes concurrent webhook/confirm
+    // calls: the first locks and fulfils, the second re-reads and matches
+    // neither branch, so fulfilment runs exactly once.
+    //   Branch 1: a normal 'pending' row.
+    //   Branch 2: a 'failed' row re-opened by a genuine late capture — only when
+    //     (a) no gift_instance exists yet, and (b) a CAPTURED payload is on file
+    //     in payment_webhooks for this charge (proof the capture was real).
+    // The NOT EXISTS on gift_instances is load-bearing: 'failed' is also set by
+    // the ordinary Tap failure path, so a DECLINED-then-CAPTURED sequence could
+    // reach branch 2; without it a duplicate gift_instances row would be created.
     const giftResult = await client.query(
-      `SELECT * FROM gifts_sent WHERE tap_charge_id = $1 AND payment_status = 'pending' FOR UPDATE`,
+      `SELECT gs.*
+       FROM gifts_sent gs
+       WHERE gs.tap_charge_id = $1
+         AND (
+               gs.payment_status = 'pending'
+            OR (
+                 gs.payment_status = 'failed'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM gift_instances gi WHERE gi.gift_sent_id = gs.id
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM payment_webhooks pw
+                   WHERE pw.charge_id = gs.tap_charge_id
+                     AND pw.status = 'CAPTURED'
+                 )
+               )
+         )
+       FOR UPDATE`,
       [tapChargeId]
     );
 
