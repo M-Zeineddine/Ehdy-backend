@@ -61,10 +61,10 @@ async function signup({ email, password, first_name, last_name, phone, country_c
       if (!existingCode) {
         await sendVerificationEmail(normalizedEmail);
       }
-      throw new AppError('Account pending verification. Please check your email for the code.', 409, 'EMAIL_UNVERIFIED');
+      throw new AppError('Account pending verification. Please check your email for the code.', 409, 'EMAIL_VERIFICATION_PENDING');
     }
     if (existingUser.phone && !existingUser.is_phone_verified) {
-      throw new AppError('Phone verification pending. Please sign in to complete it.', 409, 'PHONE_UNVERIFIED');
+      throw new AppError('Phone verification pending. Please sign in to complete it.', 409, 'PHONE_VERIFICATION_PENDING');
     }
     throw new AppError('Email address is already registered', 409, 'EMAIL_EXISTS');
   }
