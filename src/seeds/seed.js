@@ -210,15 +210,18 @@ async function seedRedemptionFixture(client, merchantMap, userId) {
 }
 
 /**
- * Expiry fixtures for the checkExpiringGifts cron. The job notifies on exact-day
- * equality (expiration_date = CURRENT_DATE + 7), so only EXP-INWIN must match.
- * The other three exist to prove the predicate excludes them.
+ * Expiry fixtures for the checkExpiringGifts cron. The job selects gifts with
+ * expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 that have no
+ * existing gift_expiring_soon notification. Only EXP-INWIN and EXP-3DAY must
+ * match; the rest prove each exclusion arm of the predicate.
  */
 const EXPIRY_FIXTURES = [
-  { code: 'EXP-INWIN',    days: 7,  redeemed: false, note: 'in window -> MUST notify' },
-  { code: 'EXP-OUTWIN',   days: 30, redeemed: false, note: 'outside window' },
-  { code: 'EXP-PAST',     days: -1, redeemed: false, note: 'already expired' },
-  { code: 'EXP-REDEEMED', days: 7,  redeemed: true,  note: 'redeemed, in window' },
+  { code: 'EXP-INWIN',    days: 7,  redeemed: false, preNotified: false, note: 'range upper bound -> MUST notify' },
+  { code: 'EXP-3DAY',     days: 3,  redeemed: false, preNotified: false, note: 'inside range -> MUST notify (proves range)' },
+  { code: 'EXP-OUTWIN',   days: 30, redeemed: false, preNotified: false, note: 'outside range' },
+  { code: 'EXP-PAST',     days: -1, redeemed: false, preNotified: false, note: 'already expired' },
+  { code: 'EXP-REDEEMED', days: 7,  redeemed: true,  preNotified: false, note: 'redeemed, in range' },
+  { code: 'EXP-NOTIFIED', days: 5,  redeemed: false, preNotified: true,  note: 'already notified -> dedupe excludes (proves dedupe)' },
 ];
 
 async function seedExpiryFixtures(client, merchantMap, userId) {
@@ -255,7 +258,17 @@ async function seedExpiryFixtures(client, merchantMap, userId) {
       [userId, gi.rows[0].id]
     );
 
-    console.log(`  ${f.code}: expires CURRENT_DATE${f.days >= 0 ? '+' : ''}${f.days}, redeemed=${f.redeemed} (${f.note})`);
+    if (f.preNotified) {
+      // Must match the cron's NOT EXISTS dedupe exactly.
+      await client.query(
+        `INSERT INTO notifications
+           (user_id, type, title, message, related_entity_type, related_entity_id)
+         VALUES ($1,'gift_expiring_soon','Gift expiring soon!','seeded prior notification','gift_instance',$2)`,
+        [userId, gi.rows[0].id]
+      );
+    }
+
+    console.log(`  ${f.code}: expires CURRENT_DATE${f.days >= 0 ? '+' : ''}${f.days}, redeemed=${f.redeemed}, preNotified=${f.preNotified} (${f.note})`);
   }
 }
 

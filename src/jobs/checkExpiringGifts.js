@@ -6,12 +6,20 @@ const notificationService = require('../services/notificationService');
 const emailService = require('../services/emailService');
 const logger = require('../utils/logger');
 
-// Notify this many days before expiry. Exact-day equality (not a range) so a
-// daily run warns each gift exactly once.
-const NOTIFY_DAYS_BEFORE = 7;
+// Notify when a gift expires within this many days.
+const NOTIFY_WINDOW_DAYS = 7;
+// Notification type used both to notify and to dedupe.
+const EXPIRY_NOTIFICATION_TYPE = 'gift_expiring_soon';
 
 /**
- * Find gift instances that expire exactly NOTIFY_DAYS_BEFORE days from today.
+ * Find gift instances expiring within NOTIFY_WINDOW_DAYS that have not already
+ * been warned.
+ *
+ * Range, not exact-day equality: an exact `= CURRENT_DATE + 7` silently drops
+ * any gift the cron never lands on — a missed run, a backfill, a 5-day expiry,
+ * an admin edit. The NOT EXISTS dedupe (keyed on the same entity columns
+ * createNotification writes) is what keeps a range from re-notifying daily, and
+ * makes the job self-healing after a missed run.
  *
  * gift_instances.expiration_date is `date`, so the window uses date arithmetic
  * (CURRENT_DATE + $1::int -> date), never NOW()/interval against a timestamp.
@@ -20,7 +28,7 @@ const NOTIFY_DAYS_BEFORE = 7;
  * gift_cards join was unrunnable after migration 003 dropped that table).
  * Exported separately so the predicate can be tested without sending email.
  */
-async function findExpiringGifts(daysBefore = NOTIFY_DAYS_BEFORE) {
+async function findExpiringGifts(windowDays = NOTIFY_WINDOW_DAYS) {
   const result = await query(
     `SELECT gi.id, gi.redemption_code, gi.expiration_date,
             gi.current_balance, gi.currency_code,
@@ -38,16 +46,22 @@ async function findExpiringGifts(daysBefore = NOTIFY_DAYS_BEFORE) {
      JOIN wallet_items wi ON wi.gift_instance_id = gi.id
      JOIN users        u  ON u.id = wi.user_id
      WHERE gi.is_redeemed = FALSE
-       AND gi.expiration_date = CURRENT_DATE + $1::int
-       AND u.deleted_at IS NULL`,
-    [daysBefore]
+       AND gi.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + $1::int
+       AND u.deleted_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.related_entity_type = 'gift_instance'
+           AND n.related_entity_id = gi.id
+           AND n.type = $2
+       )`,
+    [windowDays, EXPIRY_NOTIFICATION_TYPE]
   );
   return result.rows;
 }
 
 /**
- * Notify wallet owners about gifts expiring in NOTIFY_DAYS_BEFORE days.
- * Runs daily at 09:00 Beirut time.
+ * Notify wallet owners about gifts expiring within NOTIFY_WINDOW_DAYS.
+ * Each gift is warned at most once (NOT EXISTS dedupe). Runs daily 09:00 Beirut.
  *
  * Throws on failure — the scheduler wrapper logs it loudly. This job silently
  * swallowed its own exception for months after migration 014/003, so nothing
@@ -58,7 +72,7 @@ async function checkExpiringGifts() {
   logger.info('Running checkExpiringGifts job');
 
   const gifts = await findExpiringGifts();
-  logger.info(`checkExpiringGifts: ${gifts.length} gift(s) expiring in ${NOTIFY_DAYS_BEFORE} days`);
+  logger.info(`checkExpiringGifts: ${gifts.length} un-notified gift(s) expiring within ${NOTIFY_WINDOW_DAYS} days`);
 
   let notified = 0;
   let failed = 0;
@@ -68,9 +82,11 @@ async function checkExpiringGifts() {
       // No transaction here: each notification is an independent insert and
       // nothing else must commit atomically with it. createNotification is
       // overloaded — pass an explicit null client so it uses the pool.
+      // type + relatedEntityType MUST match the NOT EXISTS dedupe above, or
+      // every gift is re-notified on every run.
       await notificationService.createNotification(null, {
         userId: gift.user_id,
-        type: 'gift_expiring_soon',
+        type: EXPIRY_NOTIFICATION_TYPE,
         title: 'Gift expiring soon!',
         message: `Your ${gift.gift_name}${gift.merchant_name ? ` from ${gift.merchant_name}` : ''} expires on ${gift.expiration_date}. Use it before it expires!`,
         relatedEntityType: 'gift_instance',
