@@ -20,7 +20,6 @@ const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const merchantRoutes = require('./routes/merchants');
-const giftCardRoutes = require('./routes/giftCards');
 const giftRoutes = require('./routes/gifts');
 const notificationRoutes = require('./routes/notifications');
 const merchantPortalRoutes = require('./routes/merchantPortal');
@@ -120,7 +119,6 @@ app.get('/health', async (req, res) => {
 app.use('/v1/auth', authRoutes);
 app.use('/v1/users', userRoutes);
 app.use('/v1/merchants', merchantRoutes);
-app.use('/v1/gift-cards', giftCardRoutes);
 app.use('/v1/gifts', giftRoutes);
 app.use('/v1/notifications', notificationRoutes);
 app.use('/v1/merchant', merchantPortalRoutes);
