@@ -219,8 +219,14 @@ False alarms (do NOT touch): `admin.js:669` `/transactions` route (queries `rede
 **Decision / change (STOP-GATE on product intent):**
 - `GET /v1/analytics/dashboard`: since no CMS caller and it only ever queried dropped tables, **delete** the route (`src/routes/analytics.js` mount + `analyticsController.getUserDashboard`) unless the mobile app calls it. **STOP and confirm the mobile app does not consume `/v1/analytics/dashboard`** before deleting; if it does, it must be rewritten onto `gifts_sent` + `redemption_events` + `wallet_items`/`gift_instances` (the wallet-summary and favorite-merchant sub-queries already use the live model and can be salvaged).
 - `/v1/gift-cards` and `/v1/bundles` and the legacy `gifts/send` paths: **STOP-GATE — separate decision.** These query a table the live schema no longer has. Determine per surface whether the app still calls it: if dead → delete (like A3); if live → rewrite onto `merchant_items` + `custom_credit_*`. Do not fix blind.
-**Commit(s):** one per surface once each decision is made, e.g. `chore(analytics): remove dead /v1/analytics/dashboard` / `chore(gift-cards): <delete|rewrite> /v1/gift-cards off dropped gift_cards`.
-**STATUS:** REPORTED — not implemented (awaiting the delete-vs-rewrite decisions above).
+**Commit(s):** one per surface once each decision is made.
+**STATUS:** DONE (2026-07-10). App grep (`gift-cards|/bundles|gifts/send|analytics/dashboard` over `app/ src/`) returned **empty**, and the CMS calls `/v1/admin/analytics` — so all four surfaces are dead. Deleted:
+- `9a69af0` `chore(analytics): remove dead /v1/analytics/dashboard`
+- `d3cf5b1` `chore(bundles): remove dead /v1/bundles` (route + controller + bundleService)
+- `f6db214` `chore(gifts): remove dead /v1/gift-cards and legacy gift_cards send/draft flow` — also removed `giftService.createDraft/updateDraft/getDraftPreview/sendFromDraft/sendGiftDirect/_createGiftInstanceAndSend`, their controller handlers and routes, and `giftCardService`. Each was traced to its sole caller chain first; **none reachable from a live route** (app uses only `initiate-payment`, `confirm-payment`, `drafts`, `sent`, `received`; the Tap webhook creates its `gift_instance` inline).
+- `b0b4a1e` `chore(wallet): delete orphaned walletService files` — completes A3 (deletion was blocked when the route was unmounted).
+
+Only remaining `gift_cards` reference in `src/` is `checkExpiringGifts.js:24` → **A14** (a rewrite, not a delete). (`seed.js:91` is the `merchant.gift_cards` JSON key, not the table.) All mounted route modules load; unit + security suites green.
 
 ## A14 — Expiring-gifts cron references dropped `gift_cards`
 **Severity:** Medium — the daily `checkExpiringGifts` job throws on every run (caught and swallowed), so **expiry-warning notifications never fire**. This is a **notification bug, not a money bug**: `redemptionService` reads `gift_instances.expiration_date` in both `validateRedemptionCode` (:62) and `confirmRedemption` (:132) and rejects expired codes with `CODE_EXPIRED`, so expired gifts are **not** redeemable.
