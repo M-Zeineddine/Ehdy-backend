@@ -128,12 +128,34 @@ async function seedMerchants(client, categoryMap) {
   return merchantMap;
 }
 
+const TEST_EMAIL = 'test.recipient@kado.dev';
+
+/**
+ * Idempotently create the shared test recipient user.
+ */
+async function ensureTestUser(client) {
+  const uex = await client.query('SELECT id FROM users WHERE email = $1', [TEST_EMAIL]);
+  if (uex.rows.length > 0) return uex.rows[0].id;
+
+  const hash = await bcrypt.hash('Password123', 12);
+  const ur = await client.query(
+    `INSERT INTO users
+       (email, password_hash, first_name, last_name, phone, country_code,
+        is_email_verified, email_verified_at, is_phone_verified, phone_verified_at)
+     VALUES ($1,$2,'Test','Recipient','+9613000000','LB',TRUE,NOW(),TRUE,NOW())
+     RETURNING id`,
+    [TEST_EMAIL, hash]
+  );
+  console.log(`  Created test user: ${TEST_EMAIL}`);
+  return ur.rows[0].id;
+}
+
 /**
  * Build a full redemption fixture end-to-end so the first redemption test has
  * real data: a user, a paid gifts_sent (gift_item), its gift_instance, and a
  * wallet_items row owned by the user. Idempotent via a fixed share link.
  */
-async function seedRedemptionFixture(client, merchantMap) {
+async function seedRedemptionFixture(client, merchantMap, userId) {
   console.log('\nSeeding redemption fixture...');
 
   const entry = Object.values(merchantMap).find((m) => m.items && m.items.length > 0);
@@ -142,26 +164,6 @@ async function seedRedemptionFixture(client, merchantMap) {
     return;
   }
   const item = entry.items[0];
-
-  // Recipient user (idempotent by email)
-  const email = 'test.recipient@kado.dev';
-  let userId;
-  const uex = await client.query('SELECT id FROM users WHERE email = $1', [email]);
-  if (uex.rows.length > 0) {
-    userId = uex.rows[0].id;
-  } else {
-    const hash = await bcrypt.hash('Password123', 12);
-    const ur = await client.query(
-      `INSERT INTO users
-         (email, password_hash, first_name, last_name, phone, country_code,
-          is_email_verified, email_verified_at, is_phone_verified, phone_verified_at)
-       VALUES ($1,$2,'Test','Recipient','+9613000000','LB',TRUE,NOW(),TRUE,NOW())
-       RETURNING id`,
-      [email, hash]
-    );
-    userId = ur.rows[0].id;
-    console.log(`  Created test user: ${email}`);
-  }
 
   const shareLink = 'seed-fixture-gift-0001';
   const gex = await client.query('SELECT id FROM gifts_sent WHERE unique_share_link = $1', [shareLink]);
@@ -204,7 +206,57 @@ async function seedRedemptionFixture(client, merchantMap) {
     [userId, giftInstanceId, giftSentId]
   );
 
-  console.log(`  Redemption fixture ready: redemption_code=${redemptionCode} user=${email} gift_sent=${giftSentId}`);
+  console.log(`  Redemption fixture ready: redemption_code=${redemptionCode} user=${TEST_EMAIL} gift_sent=${giftSentId}`);
+}
+
+/**
+ * Expiry fixtures for the checkExpiringGifts cron. The job notifies on exact-day
+ * equality (expiration_date = CURRENT_DATE + 7), so only EXP-INWIN must match.
+ * The other three exist to prove the predicate excludes them.
+ */
+const EXPIRY_FIXTURES = [
+  { code: 'EXP-INWIN',    days: 7,  redeemed: false, note: 'in window -> MUST notify' },
+  { code: 'EXP-OUTWIN',   days: 30, redeemed: false, note: 'outside window' },
+  { code: 'EXP-PAST',     days: -1, redeemed: false, note: 'already expired' },
+  { code: 'EXP-REDEEMED', days: 7,  redeemed: true,  note: 'redeemed, in window' },
+];
+
+async function seedExpiryFixtures(client, merchantMap, userId) {
+  console.log('\nSeeding expiry fixtures...');
+
+  const entry = Object.values(merchantMap).find((m) => m.items && m.items.length > 0);
+  if (!entry) {
+    console.warn('  No merchant_item available — cannot build expiry fixtures');
+    return;
+  }
+  const item = entry.items[0];
+
+  for (const f of EXPIRY_FIXTURES) {
+    const ex = await client.query('SELECT id FROM gift_instances WHERE redemption_code = $1', [f.code]);
+    if (ex.rows.length > 0) {
+      console.log(`  ${f.code} already exists — skipping`);
+      continue;
+    }
+
+    // expiration_date is `date`: CURRENT_DATE + int -> date (no interval math).
+    const gi = await client.query(
+      `INSERT INTO gift_instances
+         (merchant_item_id, redemption_code, currency_code, type, expiration_date,
+          is_redeemed, redeemed_at)
+       VALUES ($1,$2,$3,'gift_item', CURRENT_DATE + $4::int, $5,
+               CASE WHEN $5 THEN NOW() ELSE NULL END)
+       RETURNING id`,
+      [item.id, f.code, item.currency_code || 'USD', f.days, f.redeemed]
+    );
+
+    await client.query(
+      `INSERT INTO wallet_items (user_id, gift_instance_id) VALUES ($1,$2)
+       ON CONFLICT DO NOTHING`,
+      [userId, gi.rows[0].id]
+    );
+
+    console.log(`  ${f.code}: expires CURRENT_DATE${f.days >= 0 ? '+' : ''}${f.days}, redeemed=${f.redeemed} (${f.note})`);
+  }
 }
 
 async function main() {
@@ -215,7 +267,9 @@ async function main() {
 
     const categoryMap = await seedCategories(client);
     const merchantMap = await seedMerchants(client, categoryMap);
-    await seedRedemptionFixture(client, merchantMap);
+    const userId = await ensureTestUser(client);
+    await seedRedemptionFixture(client, merchantMap, userId);
+    await seedExpiryFixtures(client, merchantMap, userId);
 
     await client.query('COMMIT');
     console.log('\nSeed completed successfully!');
