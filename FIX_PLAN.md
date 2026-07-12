@@ -175,8 +175,8 @@ const safeBranchesJson = JSON.stringify(branches)
   .replace(/</g, '\\u003c')
   .replace(/>/g, '\\u003e')
   .replace(/&/g, '\\u0026')
-  .replace(/ /g, '\\u2028')
-  .replace(/ /g, '\\u2029');
+  .replace(//g, '\\u2028')
+  .replace(//g, '\\u2029');
 ```
 Also escape the QR data URI at ~586 with the existing `escapeHtml` for consistency.
 **Commit:** `fix(xss): escape branchesJson and QR src on public gift page`
@@ -287,6 +287,36 @@ Method: fresh `postgres:17-alpine` → `migrate:up` ran all 17 files cleanly (pr
 3. **Baseline the ledger by hand** (`scripts/baseline_ledger.sql`) — the last paste, ever.
 4. **Promote 017 + 018** into `src/migrations/`, then **`migrate:up` against production** — that first successful runner-driven run is the proof.
 5. Rebuild the fresh DB from scratch (`docker compose down -v` + up + seed) as the final test.
+
+---
+
+# PART A — Day 2 (production sandbox testing, 2026-07-12)
+
+## A16 — Tap webhook verification: fulfil from authoritative charge-retrieve (NOT signature)
+**Severity:** Blocking — real Tap sandbox webhooks were rejected, so no payment could be fulfilled via webhook.
+**Root cause:** `verifyTapSignature` read `charge.hashstring` from the **body**, but Tap sends the signature as an HTTP **header**; proven against two stored sandbox payloads (`hashstring` absent top-level and nested; the strings "hash"/"signature" appear nowhere; `live_mode=false`). The verifier had therefore never validated a real webhook — pre-A6 the `if (!secret) return true` fail-open (with `TAP_SECRET_KEY` unset in prod) masked it; A5 forcing the key + A6 removing fail-open exposed it. The compute was also wrong (`id|amount|currency|status` vs Tap's `x_id…x_amount…` HMAC).
+**Decision (human, 2026-07-12):** treat the webhook body as an **untrusted trigger** and fulfil on a **re-fetched authoritative charge** (`GET /v2/charges/{id}`, our secret key). **hashstring HMAC verification is deliberately DROPPED — not silently skipped.** A byte-imperfect formula (amount decimals, empty `gateway_reference`, `transaction.created`, field order) that fulfilment doesn't gate on would be log noise that can cry wolf on valid webhooks; if a real second factor is ever wanted, build it deliberately later using the captured header. One authority: charge-retrieve. No `live_mode` gate (it's in the untrusted body; any gate keys off server-side `NODE_ENV`, never a body field — and none is needed).
+**Step-1 hash inputs (recorded, for a future deliberate signature build only):** `currency=USD` (→ amount formats to 2 decimals), `reference.gateway` absent (→ empty string), `reference.payment` populated, `transaction.created` populated (Unix-ms).
+
+## A17 — Implement charge-retrieve fulfilment (all four behaviours load-bearing)
+**Files:** `src/services/giftService.js` (`fulfillGiftFromTap`), `src/routes/webhooks.js`, `src/controllers/giftController.js` (`confirmPayment`).
+**Change:**
+1. **DB-gate FIRST, then fetch.** `fulfillGiftFromTap` looks the charge id up among our unresolved gifts (pending, or failed-and-never-fulfilled) **before** calling Tap; no match → drop, no outbound call. Stops a random-`chg_`-id POST flood from amplifying into unbounded Tap calls / rate-limiting.
+2. **Validate amount + currency**, not just status. Fulfil only when the re-fetched charge is `CAPTURED` **and** its amount+currency equal what we expected for that gift. Uses the re-fetched amount, never the body's. Mismatch → terminal, logged loudly, never fulfilled.
+3. **Transient vs terminal split.** Tap unreachable / 429 / 5xx → `getTapCharge` throws → webhook stays `processed = false` → A12 reconciliation re-drives it. Tap reachable + not captured → terminal, `processed = true`, don't fulfil (FAILED/CANCELLED/DECLINED → mark the gift failed). Never processed-and-done on a transient error.
+4. **Exactly one fetch per fulfilment.** The fetch lives inside `fulfillGiftFromTap` (after the DB gate); `confirmPayment` **stops pre-fetching** and just calls it (then reads state). The webhook is a pure trigger — no body-status branching, and `verifyTapSignature` is removed entirely.
+Supersedes A7's `payment_webhooks` CAPTURED-EXISTS re-open branch — the authoritative fetch is now the proof of capture (the `NOT EXISTS gift_instances` guard stays, still load-bearing against duplicate instances). Webhook route protection is now rate-limiting (`generalLimiter` on `/v1/`) + the DB-gate, which A18 makes see real client IPs.
+**Verify:** 8-scenario harness on a fresh DB (mocked `getTapCharge`): DB-gate/no-call, transient-throws, FAILED-not-fulfilled, amount & currency mismatch not-fulfilled, valid capture → paid + 1 instance + exactly 1 fetch, idempotent replay no-call, `processTapWebhook` transient→processed=false / terminal→processed=true. All pass.
+**Commit:** `fix(webhooks): fulfil from authoritative Tap charge-retrieve; drop signature verification (A16/A17)`
+**STATUS:** IMPLEMENTED on branch `fix/tap-charge-retrieve` (off `diag/…`). Staged, not deployed.
+
+## A18 — Trust first proxy hop (Render)
+**Change:** `app.set('trust proxy', 1)` so `req.ip`/`X-Forwarded-For` resolve to the real client behind Render's proxy and `express-rate-limit` stops warning. `1` trusts only the immediate hop.
+**Commit:** `fix(server): trust first proxy hop (Render) for correct client IP (A18)` (`b174881`, on `diag/…`).
+**STATUS:** DONE (staged on the diagnostic branch).
+
+## [TEMP] Header-capture diagnostic (revert after capture)
+On `diag/tap-webhook-headers`: persists `req.headers` under `raw_payload._tap_headers` for one sandbox webhook, to record on-file whether/where Tap's sandbox sends `hashstring`. **A17 removes it** (charge-retrieve doesn't need it). Deploy `diag` → run one sandbox payment → read `_tap_headers` → then A17 supersedes.
 
 ---
 
