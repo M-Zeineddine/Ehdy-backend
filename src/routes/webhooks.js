@@ -1,65 +1,23 @@
 'use strict';
 
-const crypto = require('crypto');
 const router = require('express').Router();
-const { fulfillGiftFromTap, failGiftFromTap } = require('../services/giftService');
+const { fulfillGiftFromTap } = require('../services/giftService');
 const { query } = require('../utils/database');
 const logger = require('../utils/logger');
 
 /**
- * Verify Tap webhook signature.
- * Tap computes HMAC-SHA256 over "id|amount|currency|status" using your secret key
- * and sends it as the `hashstring` field in the payload.
- * See: https://developers.tap.company/docs/webhook
- */
-function verifyTapSignature(charge) {
-  const secret = process.env.TAP_SECRET_KEY;
-  if (!secret) {
-    // Fail closed: without a key we cannot verify the signature.
-    logger.error('Tap webhook rejected: TAP_SECRET_KEY is not configured');
-    return false;
-  }
-
-  const hashstring = charge?.hashstring;
-  if (!hashstring) {
-    logger.warn('Tap webhook missing hashstring');
-    return false;
-  }
-
-  const payload = [
-    charge.id,
-    charge.amount,
-    charge.currency,
-    charge.status,
-  ].join('|');
-
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
-
-  // Guard hashstring format before Buffer/timingSafeEqual: must be hex of the
-  // same length as the digest, otherwise reject without relying on a throw.
-  if (typeof hashstring !== 'string' || !/^[0-9a-fA-F]+$/.test(hashstring) || hashstring.length !== expected.length) {
-    logger.warn('Tap webhook hashstring malformed or wrong length');
-    return false;
-  }
-
-  return crypto.timingSafeEqual(
-    Buffer.from(hashstring, 'hex'),
-    Buffer.from(expected, 'hex')
-  );
-}
-
-/**
- * Process a Tap charge payload and record the outcome on its payment_webhooks
- * row. Exported so the reconciliation job can re-drive unprocessed rows.
- * Only genuine exceptions (transient failures) leave processed = false; a
- * rejected signature or an unhandled status is terminal (processed = true).
+ * Process a Tap webhook. The body is only an untrusted TRIGGER — we do not
+ * verify a body signature and do not act on the body's status/amount.
+ * fulfillGiftFromTap re-fetches the authoritative charge from Tap (DB-gated,
+ * one fetch) and decides everything from that.
+ *
+ * Transient failures (Tap unreachable / 429 / 5xx) throw -> processed stays
+ * false so the reconciliation cron re-drives the row. Any terminal outcome
+ * (fulfilled / not captured / amount mismatch / no matching gift) returns and
+ * marks processed = true. Exported so the reconciliation job reuses it.
  */
 async function processTapWebhook(webhookRowId, charge) {
   const chargeId = charge?.id;
-  const status = charge?.status;
   let processed = false;
   let errorMessage = null;
 
@@ -68,25 +26,18 @@ async function processTapWebhook(webhookRowId, charge) {
       logger.warn('Tap webhook missing charge id', { webhookRowId });
       errorMessage = 'missing charge id';
       processed = true; // nothing to retry
-    } else if (!verifyTapSignature(charge)) {
-      logger.warn('Tap webhook signature verification failed', { chargeId });
-      errorMessage = 'signature verification failed';
-      processed = true; // rejected, not retryable
     } else {
-      logger.info('Tap webhook processing', { chargeId, status });
-      if (status === 'CAPTURED') {
-        await fulfillGiftFromTap(chargeId);
-      } else if (status === 'FAILED' || status === 'CANCELLED') {
-        await failGiftFromTap(chargeId);
-      } else {
-        logger.debug('Unhandled Tap charge status', { chargeId, status });
-      }
+      logger.info('Tap webhook processing', { chargeId, bodyStatus: charge?.status });
+      // Authoritative: fulfillGiftFromTap gates on our DB, re-fetches the charge
+      // from Tap, and fulfils only a validated CAPTURED charge.
+      await fulfillGiftFromTap(chargeId);
       processed = true;
     }
   } catch (err) {
-    // Transient failure — leave processed = false so reconciliation retries.
+    // Transient failure (e.g. Tap unreachable) — leave processed = false so the
+    // reconciliation cron re-drives it. Never mark done on a transient error.
     errorMessage = err.message;
-    logger.error('Error processing Tap webhook', { error: err.message, stack: err.stack });
+    logger.error('Error processing Tap webhook (will retry)', { error: err.message, stack: err.stack });
   }
 
   if (webhookRowId) {
@@ -112,19 +63,12 @@ const tapWebhook = async (req, res) => {
 
   // Persist the raw payload BEFORE acknowledging, so a crash mid-processing
   // never loses the event — the reconciliation job re-drives unprocessed rows.
-  //
-  // [TEMP-DIAGNOSTIC — REVERT AFTER CAPTURE] Tap sends the signature as an HTTP
-  // header (hashstring), not in the body, so verifyTapSignature (which reads
-  // charge.hashstring) always rejects. We stash req.headers under _tap_headers
-  // to learn the exact header name/shape from one sandbox webhook. The extra key
-  // is ignored by verify/fulfil/reconcile (they read charge.id/status/etc.).
-  const diagnosticPayload = { ...charge, _tap_headers: req.headers };
   let webhookRowId = null;
   try {
     const ins = await query(
       `INSERT INTO payment_webhooks (provider, charge_id, status, raw_payload, processed)
        VALUES ('tap', $1, $2, $3, FALSE) RETURNING id`,
-      [chargeId, status, JSON.stringify(diagnosticPayload)]
+      [chargeId, status, JSON.stringify(charge)]
     );
     webhookRowId = ins.rows[0].id;
   } catch (logErr) {

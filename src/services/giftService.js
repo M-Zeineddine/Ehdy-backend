@@ -366,39 +366,75 @@ async function initiateGiftPayment(userId, {
 }
 
 /**
- * Called from the Tap webhook when a charge is CAPTURED.
- * Creates the gift_instance, marks gifts_sent as paid, adds to wallet if recipient has account.
+ * Fulfil the gift behind a Tap charge, using the AUTHORITATIVE charge retrieved
+ * from Tap as the single source of truth. The webhook body is only an untrusted
+ * trigger — we never fulfil on the body's status or amount.
+ *
+ * Order is load-bearing:
+ *   1. Cheap DB gate FIRST — never call Tap for a charge id that is not one of
+ *      our unresolved gifts. Stops a random-chg_id POST flood from amplifying
+ *      into unbounded outbound Tap calls (and Tap rate-limiting us).
+ *   2. Re-fetch the charge from Tap. A network / 429 / 5xx / not-found failure
+ *      THROWS — the webhook caller leaves processed=false and the A12
+ *      reconciliation cron re-drives it (transient). Never marked done on a
+ *      transient failure, so a real capture is never silently dropped.
+ *   3. Terminal — Tap says not captured: do not fulfil. On a definitive failure
+ *      mark the gift failed so its draft frees up.
+ *   4. Captured: fulfil, but only after the RE-FETCHED amount + currency match
+ *      what we expected for this gift. Status alone is not enough.
+ *
+ * Returns the gift row on fulfilment, or null on any terminal non-fulfilment
+ * (no unresolved gift / not captured / amount mismatch / already fulfilled).
  */
 async function fulfillGiftFromTap(tapChargeId) {
+  const { getTapCharge } = require('./paymentService');
+
+  // (1) DB-first gate. Unresolved = pending, or failed-but-never-fulfilled
+  //     (a genuine late capture can re-open it).
+  const gate = await query(
+    `SELECT 1 FROM gifts_sent gs
+     WHERE gs.tap_charge_id = $1
+       AND (gs.payment_status = 'pending'
+            OR (gs.payment_status = 'failed'
+                AND NOT EXISTS (SELECT 1 FROM gift_instances gi WHERE gi.gift_sent_id = gs.id)))
+     LIMIT 1`,
+    [tapChargeId]
+  );
+  if (!gate.rows.length) {
+    logger.info('Tap fulfilment skipped: no unresolved gift for charge', { tapChargeId });
+    return null;
+  }
+
+  // (2) Authoritative fetch. Throws on transient failure -> caller retries.
+  const charge = await getTapCharge(tapChargeId);
+  const status = charge?.status;
+
+  // (3) Terminal, not captured: do not fulfil.
+  if (status !== 'CAPTURED') {
+    if (status === 'FAILED' || status === 'CANCELLED' || status === 'DECLINED') {
+      await failGiftFromTap(tapChargeId);
+    }
+    logger.info('Tap charge not captured; not fulfilling', { tapChargeId, status });
+    return null;
+  }
+
+  const capturedAmount = parseFloat(charge.amount);
+  const capturedCurrency = (charge.currency || '').toUpperCase();
+
+  // (4) Fulfil under a row lock. The predicate no longer needs a stored-webhook
+  //     CAPTURED check — the authoritative getTapCharge above IS the proof, so
+  //     it supersedes the former payment_webhooks EXISTS branch. FOR UPDATE
+  //     still serializes concurrent webhook/confirm calls so it runs once.
   return withTransaction(async (client) => {
-    // Find the gift to fulfil. FOR UPDATE serializes concurrent webhook/confirm
-    // calls: the first locks and fulfils, the second re-reads and matches
-    // neither branch, so fulfilment runs exactly once.
-    //   Branch 1: a normal 'pending' row.
-    //   Branch 2: a 'failed' row re-opened by a genuine late capture — only when
-    //     (a) no gift_instance exists yet, and (b) a CAPTURED payload is on file
-    //     in payment_webhooks for this charge (proof the capture was real).
-    // The NOT EXISTS on gift_instances is load-bearing: 'failed' is also set by
-    // the ordinary Tap failure path, so a DECLINED-then-CAPTURED sequence could
-    // reach branch 2; without it a duplicate gift_instances row would be created.
     const giftResult = await client.query(
       `SELECT gs.*
        FROM gifts_sent gs
        WHERE gs.tap_charge_id = $1
-         AND (
-               gs.payment_status = 'pending'
-            OR (
-                 gs.payment_status = 'failed'
-                 AND NOT EXISTS (
-                   SELECT 1 FROM gift_instances gi WHERE gi.gift_sent_id = gs.id
-                 )
-                 AND EXISTS (
-                   SELECT 1 FROM payment_webhooks pw
-                   WHERE pw.charge_id = gs.tap_charge_id
-                     AND pw.status = 'CAPTURED'
-                 )
-               )
-         )
+         AND (gs.payment_status = 'pending'
+              OR (gs.payment_status = 'failed'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM gift_instances gi WHERE gi.gift_sent_id = gs.id
+                  )))
        FOR UPDATE`,
       [tapChargeId]
     );
@@ -410,30 +446,46 @@ async function fulfillGiftFromTap(tapChargeId) {
 
     const gift = giftResult.rows[0];
 
-    // Resolve item details
+    // Expected amount + currency for THIS gift.
     let initialBalance = null;
+    let expectedAmount = null;
     let currencyCode = 'USD';
-    let expirationDate = null;
+    const expirationDate = null;
 
     if (gift.merchant_item_id) {
       const r = await client.query(
-        'SELECT currency_code FROM merchant_items WHERE id = $1',
+        'SELECT price, currency_code FROM merchant_items WHERE id = $1',
         [gift.merchant_item_id]
       );
-      if (r.rows.length) currencyCode = r.rows[0].currency_code;
+      if (r.rows.length) {
+        expectedAmount = parseFloat(r.rows[0].price);
+        currencyCode = r.rows[0].currency_code;
+      }
     } else if (gift.custom_credit_amount) {
       initialBalance = parseFloat(gift.custom_credit_amount);
+      expectedAmount = initialBalance;
       currencyCode = gift.custom_credit_currency || 'USD';
     }
 
-    // Determine gift type
-    const giftType = gift.merchant_item_id ? 'gift_item' : 'store_credit';
+    // Validate the captured charge against what we expected. Use the re-fetched
+    // amount, never the body's. A mismatch is a real anomaly -> log loudly,
+    // never fulfil.
+    if (
+      !Number.isFinite(capturedAmount) ||
+      !Number.isFinite(expectedAmount) ||
+      capturedCurrency !== (currencyCode || '').toUpperCase() ||
+      Math.abs(capturedAmount - expectedAmount) > 0.001
+    ) {
+      logger.error('Tap capture amount/currency mismatch; NOT fulfilling', {
+        tapChargeId, expectedAmount, expectedCurrency: currencyCode, capturedAmount, capturedCurrency,
+      });
+      return null;
+    }
 
-    // Generate redemption code + QR
+    const giftType = gift.merchant_item_id ? 'gift_item' : 'store_credit';
     const redemptionCode = generateRedemptionCode();
     const qrCode = await generateQRCode(redemptionCode);
 
-    // Create gift_instance with type
     const instanceResult = await client.query(
       `INSERT INTO gift_instances
          (merchant_item_id, custom_credit_merchant_id,
@@ -457,7 +509,6 @@ async function fulfillGiftFromTap(tapChargeId) {
 
     const instance = instanceResult.rows[0];
 
-    // Mark gift as paid and set delivery_channel (whatsapp since recipient_phone is always used)
     await client.query(
       `UPDATE gifts_sent
        SET payment_status = 'paid', delivery_channel = 'whatsapp', updated_at = NOW()
@@ -485,7 +536,7 @@ async function fulfillGiftFromTap(tapChargeId) {
       }
     }
 
-    logger.info('Gift fulfilled from Tap payment', { giftSentId: gift.id, tapChargeId });
+    logger.info('Gift fulfilled from authoritative Tap capture', { giftSentId: gift.id, tapChargeId });
     return gift;
   });
 }

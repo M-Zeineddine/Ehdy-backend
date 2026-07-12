@@ -1,7 +1,6 @@
 'use strict';
 
 const giftService = require('../services/giftService');
-const paymentService = require('../services/paymentService');
 const { AppError } = require('../middleware/errorHandler');
 const { successResponse, paginatedResponse } = require('../utils/formatters');
 
@@ -76,15 +75,11 @@ const confirmPayment = async (req, res, next) => {
     const { tap_id } = req.body;
     if (!tap_id) return next(new AppError('tap_id is required', 400, 'MISSING_TAP_ID'));
 
-    // Verify the charge actually succeeded with Tap before fulfilling
-    const charge = await paymentService.getTapCharge(tap_id);
-    if (charge.status !== 'CAPTURED') {
-      return next(new AppError('Charge not captured', 400, 'PAYMENT_NOT_CAPTURED'));
-    }
-
-    // Idempotent: returns null if the webhook already fulfilled this charge, so
-    // read the authoritative gifts_sent state afterwards rather than trusting
-    // this return value.
+    // fulfillGiftFromTap now does the authoritative Tap charge-retrieve itself
+    // (DB-gated, exactly one fetch) and fulfils only a validated CAPTURED charge.
+    // Do NOT pre-fetch here — that would be a second fetch on the confirm path.
+    // It is idempotent and returns null if the webhook already fulfilled the
+    // charge, so we read the authoritative gifts_sent state afterwards.
     await giftService.fulfillGiftFromTap(tap_id);
 
     const state = await giftService.getPaymentStateByChargeId(tap_id, req.userId);
@@ -92,8 +87,9 @@ const confirmPayment = async (req, res, next) => {
       return next(new AppError('Gift not found for this charge', 404, 'GIFT_NOT_FOUND'));
     }
 
-    // state.unique_share_link is null unless payment_status === 'paid'.
-    return successResponse(res, state, 'Gift fulfilled.');
+    // state.payment_status is the server's verdict (paid | pending | failed);
+    // unique_share_link is null unless paid. The app renders success only on paid.
+    return successResponse(res, state, 'Payment status retrieved.');
   } catch (err) {
     return next(err);
   }
