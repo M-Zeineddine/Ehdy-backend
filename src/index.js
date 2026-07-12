@@ -29,6 +29,11 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 
+// Behind Render's proxy: trust the first hop so req.ip / X-Forwarded-For are
+// correct and express-rate-limit stops warning about a spoofable client IP.
+// '1' (not true) trusts only the immediate proxy, not an arbitrary chain.
+app.set('trust proxy', 1);
+
 // ─── Swagger Docs (dev only) ───────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'production') {
   app.use(
