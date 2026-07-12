@@ -491,13 +491,27 @@ async function fulfillGiftFromTap(tapChargeId) {
 }
 
 /**
+ * Shape a gifts_sent row into the public payment-state payload.
+ *
+ * unique_share_link is only returned once payment_status = 'paid' — a share
+ * link IS the gift (the public /gift/:shareCode page renders it), so it is
+ * never exposed for an unpaid row. Single place so both payment-state readers
+ * apply the rule identically.
+ */
+function _toPaymentState(row) {
+  if (!row) return null;
+  const { payment_status, unique_share_link } = row;
+  return {
+    payment_status,
+    unique_share_link: payment_status === 'paid' ? unique_share_link : null,
+  };
+}
+
+/**
  * Read the authoritative payment state of the gift behind a Tap charge.
  *
- * Scoped to the requesting sender: a share link is the gift, so one user must
- * never be able to read another user's link by guessing a tap_charge_id.
- *
- * unique_share_link is only returned once payment_status = 'paid' — never
- * expose a share link for an unpaid row.
+ * Scoped to the requesting sender: one user must never be able to read
+ * another's share link by guessing a tap_charge_id.
  */
 async function getPaymentStateByChargeId(tapChargeId, userId) {
   const result = await query(
@@ -506,14 +520,25 @@ async function getPaymentStateByChargeId(tapChargeId, userId) {
      WHERE tap_charge_id = $1 AND sender_user_id = $2`,
     [tapChargeId, userId]
   );
+  return _toPaymentState(result.rows[0]);
+}
 
-  if (!result.rows.length) return null;
-
-  const { payment_status, unique_share_link } = result.rows[0];
-  return {
-    payment_status,
-    unique_share_link: payment_status === 'paid' ? unique_share_link : null,
-  };
+/**
+ * Read the current payment state of a gifts_sent row by id.
+ *
+ * Pure read: does NOT verify the charge with Tap and does NOT trigger
+ * fulfilment. A row that is still 'pending' is reported as pending — the caller
+ * decides whether to keep waiting. Same ownership scoping as the charge-id
+ * reader: a gift that is not yours reads as not-found.
+ */
+async function getPaymentStateByGiftSentId(giftSentId, userId) {
+  const result = await query(
+    `SELECT payment_status, unique_share_link
+     FROM gifts_sent
+     WHERE id = $1 AND sender_user_id = $2`,
+    [giftSentId, userId]
+  );
+  return _toPaymentState(result.rows[0]);
 }
 
 /**
@@ -623,6 +648,7 @@ module.exports = {
   initiateGiftPayment,
   fulfillGiftFromTap,
   getPaymentStateByChargeId,
+  getPaymentStateByGiftSentId,
   failGiftFromTap,
   saveRetryDraft,
   getRetryDraft,

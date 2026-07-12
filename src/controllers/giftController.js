@@ -99,8 +99,28 @@ const confirmPayment = async (req, res, next) => {
   }
 };
 
+/**
+ * GET /v1/gifts/:id/payment-status
+ * Pure read of the current gifts_sent state — does not verify the charge with
+ * Tap and does not trigger fulfilment. 'pending' is a valid answer; the caller
+ * decides whether to wait.
+ */
+const getPaymentStatus = async (req, res, next) => {
+  try {
+    const state = await giftService.getPaymentStateByGiftSentId(req.params.id, req.userId);
+    if (!state) {
+      return next(new AppError('Gift not found', 404, 'GIFT_NOT_FOUND'));
+    }
+    // state.unique_share_link is null unless payment_status === 'paid'.
+    return successResponse(res, state);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   getSentGifts,
+  getPaymentStatus,
   getReceivedGifts,
   claimGift,
   initiatePayment,

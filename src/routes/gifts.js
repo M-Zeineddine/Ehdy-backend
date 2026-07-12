@@ -4,7 +4,7 @@ const router = require('express').Router();
 const giftController = require('../controllers/giftController');
 const { authenticate } = require('../middleware/auth');
 const { validate } = require('../middleware/validation');
-const { paginationValidation } = require('../utils/validators');
+const { paginationValidation, uuidParamValidation } = require('../utils/validators');
 const { claimLimiter } = require('../middleware/rateLimiter');
 
 router.use(authenticate);
@@ -189,5 +189,9 @@ router.delete('/drafts/:draft_id', giftController.deleteRetryDraft);
 router.get('/sent', paginationValidation, validate, giftController.getSentGifts);
 router.get('/received', paginationValidation, validate, giftController.getReceivedGifts);
 router.post('/claim/:share_code', claimLimiter, giftController.claimGift);
+
+// Registered after the literal routes so ':id' cannot shadow them. UUID-checked
+// so a malformed id is a 422, not a Postgres 22P02 surfacing as a 500.
+router.get('/:id/payment-status', uuidParamValidation('id'), validate, giftController.getPaymentStatus);
 
 module.exports = router;
