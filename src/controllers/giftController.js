@@ -82,8 +82,18 @@ const confirmPayment = async (req, res, next) => {
       return next(new AppError('Charge not captured', 400, 'PAYMENT_NOT_CAPTURED'));
     }
 
+    // Idempotent: returns null if the webhook already fulfilled this charge, so
+    // read the authoritative gifts_sent state afterwards rather than trusting
+    // this return value.
     await giftService.fulfillGiftFromTap(tap_id);
-    return successResponse(res, {}, 'Gift fulfilled.');
+
+    const state = await giftService.getPaymentStateByChargeId(tap_id, req.userId);
+    if (!state) {
+      return next(new AppError('Gift not found for this charge', 404, 'GIFT_NOT_FOUND'));
+    }
+
+    // state.unique_share_link is null unless payment_status === 'paid'.
+    return successResponse(res, state, 'Gift fulfilled.');
   } catch (err) {
     return next(err);
   }
