@@ -61,10 +61,10 @@ async function signup({ email, password, first_name, last_name, phone, country_c
       if (!existingCode) {
         await sendVerificationEmail(normalizedEmail);
       }
-      throw new AppError('Account pending verification. Please check your email for the code.', 409, 'EMAIL_UNVERIFIED');
+      throw new AppError('Account pending verification. Please check your email for the code.', 409, 'EMAIL_VERIFICATION_PENDING');
     }
     if (existingUser.phone && !existingUser.is_phone_verified) {
-      throw new AppError('Phone verification pending. Please sign in to complete it.', 409, 'PHONE_UNVERIFIED');
+      throw new AppError('Phone verification pending. Please sign in to complete it.', 409, 'PHONE_VERIFICATION_PENDING');
     }
     throw new AppError('Email address is already registered', 409, 'EMAIL_EXISTS');
   }
@@ -113,7 +113,7 @@ async function sendVerificationEmail(email) {
   const key = `email_verify:${email.toLowerCase()}`;
   await redis.set(key, code, { EX: EMAIL_VERIFY_TTL });
 
-  logger.info(`[VERIFY] Email verification code for ${email}: ${code}`);
+  logger.info('Email verification code generated', { email });
 
   await emailService.sendVerificationEmail(email, code);
   return true;
@@ -327,48 +327,6 @@ async function resetPassword({ email, code, password }) {
 }
 
 /**
- * Social login (Google / Apple).
- * Creates user if not exists.
- */
-async function socialLogin({ provider, id_token, email, first_name, last_name }) {
-  // In production, you would verify the id_token with Google/Apple
-  // For now we trust the passed email after token verification
-  if (!email) {
-    throw new AppError('Email is required for social login', 400, 'EMAIL_REQUIRED');
-  }
-
-  let result = await query(
-    'SELECT id, email, first_name, last_name, auth_provider, deleted_at FROM users WHERE email = $1',
-    [email.toLowerCase()]
-  );
-
-  let user;
-  if (result.rows.length === 0) {
-    // Create new user
-    const insertResult = await query(
-      `INSERT INTO users (email, first_name, last_name, auth_provider, is_email_verified, email_verified_at)
-       VALUES ($1, $2, $3, $4, TRUE, NOW())
-       RETURNING id, email, first_name, last_name, is_email_verified`,
-      [email.toLowerCase(), first_name || '', last_name || '', provider]
-    );
-    user = insertResult.rows[0];
-    logger.info('Social login - new user created', { userId: user.id, provider });
-  } else {
-    user = result.rows[0];
-    if (user.deleted_at) {
-      throw new AppError('This account has been deactivated', 403, 'ACCOUNT_DELETED');
-    }
-    await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
-    logger.info('Social login - existing user', { userId: user.id, provider });
-  }
-
-  const access_token = generateAccessToken(user.id);
-  const refresh_token = generateRefreshToken(user.id);
-
-  return { access_token, refresh_token, user };
-}
-
-/**
  * Send a WhatsApp OTP to the given phone number via VerifyWay.
  */
 async function sendPhoneOtp(phone) {
@@ -436,7 +394,6 @@ module.exports = {
   refreshToken,
   forgotPassword,
   resetPassword,
-  socialLogin,
   sendPhoneOtp,
   verifyPhoneOtp,
   generateAccessToken,

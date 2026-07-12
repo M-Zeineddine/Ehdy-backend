@@ -16,351 +16,7 @@ async function generateUniqueShareCode() {
   throw new AppError('Failed to generate unique share code', 500, 'SHARE_CODE_COLLISION');
 }
 const { generateQRCode } = require('../utils/qrCode');
-const { calculateExpirationDate, getGiftCardById } = require('./giftCardService');
-const notificationService = require('./notificationService');
-const emailService = require('./emailService');
-const smsService = require('./smsService');
 const logger = require('../utils/logger');
-
-/**
- * Create a gift draft for the multi-step flow.
- */
-async function createDraft(userId, draftData) {
-  const {
-    gift_card_id,
-    bundle_id,
-    gift_type,
-    credit_amount,
-    sender_name,
-    recipient_name,
-    personal_message,
-    theme,
-    delivery_channel,
-    recipient_phone,
-    recipient_email,
-  } = draftData;
-
-  const result = await query(
-    `INSERT INTO gift_drafts
-       (user_id, gift_card_id, bundle_id, gift_type, credit_amount, sender_name,
-        recipient_name, personal_message, theme, delivery_channel,
-        recipient_phone, recipient_email, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'draft')
-     RETURNING *`,
-    [
-      userId,
-      gift_card_id || null,
-      bundle_id || null,
-      gift_type || null,
-      credit_amount || null,
-      sender_name || null,
-      recipient_name || null,
-      personal_message || null,
-      theme || null,
-      delivery_channel || null,
-      recipient_phone || null,
-      recipient_email || null,
-    ]
-  );
-
-  return result.rows[0];
-}
-
-/**
- * Update a gift draft.
- */
-async function updateDraft(draftId, userId, updates) {
-  const allowedFields = [
-    'gift_card_id', 'bundle_id', 'gift_type', 'credit_amount',
-    'sender_name', 'recipient_name', 'personal_message', 'theme',
-    'delivery_channel', 'recipient_phone', 'recipient_email',
-  ];
-
-  const fields = [];
-  const values = [];
-  let idx = 1;
-
-  for (const field of allowedFields) {
-    if (updates[field] !== undefined) {
-      fields.push(`${field} = $${idx++}`);
-      values.push(updates[field]);
-    }
-  }
-
-  if (fields.length === 0) {
-    throw new AppError('No valid fields to update', 400, 'NO_UPDATES');
-  }
-
-  fields.push('updated_at = NOW()');
-  values.push(draftId, userId);
-
-  const result = await query(
-    `UPDATE gift_drafts SET ${fields.join(', ')}
-     WHERE id = $${idx++} AND user_id = $${idx++} AND status = 'draft'
-     RETURNING *`,
-    values
-  );
-
-  if (result.rows.length === 0) {
-    throw new AppError('Draft not found or already sent', 404, 'DRAFT_NOT_FOUND');
-  }
-
-  return result.rows[0];
-}
-
-/**
- * Get draft preview details.
- */
-async function getDraftPreview(draftId, userId) {
-  const result = await query(
-    'SELECT * FROM gift_drafts WHERE id = $1 AND user_id = $2',
-    [draftId, userId]
-  );
-
-  if (result.rows.length === 0) {
-    throw new AppError('Draft not found', 404, 'DRAFT_NOT_FOUND');
-  }
-
-  const draft = result.rows[0];
-
-  // Fetch gift card details if provided
-  if (draft.gift_card_id) {
-    const gc = await getGiftCardById(draft.gift_card_id);
-    draft.gift_card = gc;
-  }
-
-  return draft;
-}
-
-/**
- * Finalize a draft and send the gift after payment.
- */
-async function sendFromDraft(draftId, userId) {
-  return withTransaction(async (client) => {
-    const draftResult = await client.query(
-      'SELECT * FROM gift_drafts WHERE id = $1 AND user_id = $2 AND status = $3',
-      [draftId, userId, 'draft']
-    );
-
-    if (draftResult.rows.length === 0) {
-      throw new AppError('Draft not found or already sent', 404, 'DRAFT_NOT_FOUND');
-    }
-
-    const draft = draftResult.rows[0];
-    const gc = await getGiftCardById(draft.gift_card_id);
-
-    const { giftInstance, shareCode } = await _createGiftInstanceAndSend(client, {
-      userId,
-      giftCard: gc,
-      draft,
-    });
-
-    await client.query(
-      `UPDATE gift_drafts SET status = 'sent', updated_at = NOW() WHERE id = $1`,
-      [draftId]
-    );
-
-    return { giftInstance, shareCode };
-  });
-}
-
-/**
- * Send a gift directly (Mode 1 - no draft).
- */
-async function sendGiftDirect(userId, {
-  gift_card_id,
-  recipient_name,
-  recipient_email,
-  recipient_phone,
-  delivery_channel,
-  personal_message,
-  theme,
-  sender_name,
-}) {
-  return withTransaction(async (client) => {
-    const gc = await getGiftCardById(gift_card_id);
-
-    const draft = {
-      gift_card_id,
-      recipient_name,
-      recipient_email: recipient_email || null,
-      recipient_phone: recipient_phone || null,
-      delivery_channel,
-      personal_message: personal_message || null,
-      theme: theme || null,
-      sender_name: sender_name || null,
-    };
-
-    const { giftInstance, shareCode } = await _createGiftInstanceAndSend(client, {
-      userId,
-      giftCard: gc,
-      draft,
-    });
-
-    return { giftInstance, shareCode };
-  });
-}
-
-/**
- * Internal helper: create gift instance, wallet item, and send notification.
- */
-async function _createGiftInstanceAndSend(client, { userId, giftCard, draft }) {
-  const redemptionCode = generateRedemptionCode();
-  const qrCode = await generateQRCode(redemptionCode);
-  const shareCode = await generateUniqueShareCode();
-  const expirationDate = calculateExpirationDate(giftCard);
-
-  const initialBalance =
-    giftCard.type === 'store_credit' ? parseFloat(giftCard.credit_amount) : null;
-
-  const instanceResult = await client.query(
-    `INSERT INTO gift_instances
-       (gift_card_id, redemption_code, redemption_qr_code,
-        current_balance, initial_balance, currency_code, expiration_date,
-        type)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING *`,
-    [
-      giftCard.id,
-      redemptionCode,
-      qrCode,
-      initialBalance,
-      initialBalance,
-      giftCard.currency_code,
-      expirationDate,
-      giftCard.type,
-    ]
-  );
-
-  const giftInstance = instanceResult.rows[0];
-
-  // Resolve recipient user if email/phone matches an account
-  let recipientUserId = null;
-  if (draft.recipient_email) {
-    const recipResult = await client.query(
-      'SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL',
-      [draft.recipient_email]
-    );
-    if (recipResult.rows.length > 0) recipientUserId = recipResult.rows[0].id;
-  }
-
-  // Create gifts_sent record
-  const sentResult = await client.query(
-    `INSERT INTO gifts_sent
-       (sender_user_id, gift_card_id, recipient_user_id, recipient_email,
-        recipient_phone, recipient_name, theme, sender_name, personal_message,
-        delivery_channel, unique_share_link)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-     RETURNING *`,
-    [
-      userId,
-      giftCard.id,
-      recipientUserId,
-      draft.recipient_email || null,
-      draft.recipient_phone || null,
-      draft.recipient_name || null,
-      draft.theme || null,
-      draft.sender_name || null,
-      draft.personal_message || null,
-      draft.delivery_channel,
-      shareCode,
-    ]
-  );
-
-  const giftSent = sentResult.rows[0];
-
-  // Link gift_instance to gifts_sent
-  await client.query(
-    `UPDATE gift_instances SET gift_sent_id = $1 WHERE id = $2`,
-    [giftSent.id, giftInstance.id]
-  );
-
-  // Get sender name for notifications
-  const senderResult = await client.query(
-    'SELECT first_name, last_name FROM users WHERE id = $1',
-    [userId]
-  );
-  const senderName = senderResult.rows[0]
-    ? `${senderResult.rows[0].first_name} ${senderResult.rows[0].last_name}`.trim()
-    : draft.sender_name || 'Someone';
-
-  // If recipient has an Ehdy account, add to their wallet
-  if (recipientUserId) {
-    await client.query(
-      `INSERT INTO wallet_items (user_id, gift_instance_id, sender_user_id, gift_sent_id)
-       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-      [recipientUserId, giftInstance.id, userId, giftSent.id]
-    );
-
-    await notificationService.createNotification(client, {
-      userId: recipientUserId,
-      type: 'gift_received',
-      title: 'You received a gift!',
-      message: `${senderName} sent you a gift on Ehdy!`,
-      relatedEntityType: 'gift_sent',
-      relatedEntityId: giftSent.id,
-    });
-  }
-
-  // Send external notification asynchronously and log the attempt
-  setImmediate(async () => {
-    let status = 'failed';
-    let errorMessage = null;
-    let providerRef = null;
-
-    try {
-      if (draft.delivery_channel === 'email' && draft.recipient_email) {
-        await emailService.sendGiftReceivedEmail({
-          recipientEmail: draft.recipient_email,
-          recipientName: draft.recipient_name,
-          senderName,
-          merchantName: giftCard.merchant_name,
-          personalMessage: draft.personal_message,
-          shareLink: shareCode,
-          theme: draft.theme,
-        });
-        status = 'sent';
-      } else if (['sms', 'whatsapp'].includes(draft.delivery_channel) && draft.recipient_phone) {
-        const result = await smsService.sendGiftNotification({
-          recipientPhone: draft.recipient_phone,
-          recipientName: draft.recipient_name,
-          senderName,
-          shareLink: shareCode,
-          channel: draft.delivery_channel,
-        });
-        providerRef = result?.messageId || null;
-        status = 'sent';
-      } else {
-        return; // No channel configured — skip logging
-      }
-    } catch (notifyErr) {
-      errorMessage = notifyErr.message;
-      logger.error('Failed to send gift notification', { error: notifyErr.message, shareCode });
-    }
-
-    try {
-      await query(
-        `INSERT INTO notification_attempts
-           (gift_sent_id, channel, recipient, status, provider, provider_ref, error_message)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          giftSent.id,
-          draft.delivery_channel,
-          draft.recipient_email || draft.recipient_phone,
-          status,
-          draft.delivery_channel === 'email' ? 'zoho' : 'verifyway',
-          providerRef,
-          errorMessage,
-        ]
-      );
-    } catch (logErr) {
-      logger.error('Failed to log notification attempt', { error: logErr.message });
-    }
-  });
-
-  return { giftInstance, giftSent, shareCode };
-}
-
 
 /**
  * Get sent gifts for a user.
@@ -493,6 +149,7 @@ async function initiateGiftPayment(userId, {
   recipient_phone,
   personal_message,
   theme,
+  gift_draft_id,
 }) {
   const { createTapCharge } = require('./paymentService');
 
@@ -504,7 +161,12 @@ async function initiateGiftPayment(userId, {
       [merchant_item_id]
     );
     if (!r.rows.length) throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
+    // merchant_items.price is nullable; an active item can have a null price.
+    // Guard so a null/NaN price never becomes a NaN-amount Tap charge.
     amount = parseFloat(r.rows[0].price);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new AppError('This item is not available for purchase', 400, 'INVALID_ITEM_PRICE');
+    }
     currency = r.rows[0].currency_code;
   } else if (custom_credit_amount != null && custom_credit_merchant_id) {
     amount = parseFloat(custom_credit_amount);
@@ -532,6 +194,39 @@ async function initiateGiftPayment(userId, {
   // Prevent sending a gift to yourself
   if (recipient_phone && user.phone && user.phone === recipient_phone) {
     throw new AppError('You cannot send a gift to yourself', 400, 'SELF_SEND_NOT_ALLOWED');
+  }
+
+  // Draft-keyed idempotency: at most one pending charge per draft (enforced by
+  // the partial unique index gifts_sent_one_pending_per_draft). If a live
+  // pending charge already exists for this draft, return it rather than
+  // creating a second Tap charge.
+  if (gift_draft_id) {
+    const existingDraft = await query(
+      `SELECT id, tap_charge_id, unique_share_link FROM gifts_sent
+       WHERE gift_draft_id = $1 AND payment_status = 'pending' AND tap_charge_id IS NOT NULL
+       LIMIT 1`,
+      [gift_draft_id]
+    );
+    if (existingDraft.rows.length) {
+      const existing = existingDraft.rows[0];
+      const { getTapCharge } = require('./paymentService');
+      try {
+        const charge = await getTapCharge(existing.tap_charge_id);
+        if (charge?.transaction?.url) {
+          logger.info('Returning existing pending gift for draft idempotency', { giftSentId: existing.id, giftDraftId: gift_draft_id });
+          return {
+            gift_sent_id: existing.id,
+            tap_transaction_url: charge.transaction.url,
+            unique_share_link: existing.unique_share_link,
+            amount,
+            currency,
+          };
+        }
+      } catch (_) {
+        // Tap charge no longer resolvable — fall through; the INSERT's unique
+        // guard (23505) below handles the still-pending row.
+      }
+    }
   }
 
   // Idempotency: return existing pending record if the same user is sending
@@ -577,31 +272,66 @@ async function initiateGiftPayment(userId, {
   // Generate share link now so it's ready when the recipient gets the link
   const shareCode = await generateUniqueShareCode();
 
-  // Create pending gifts_sent record
-  const sentResult = await query(
-    `INSERT INTO gifts_sent
-       (sender_user_id, merchant_item_id,
-        custom_credit_amount, custom_credit_currency, custom_credit_merchant_id,
-        sender_name, recipient_name, recipient_phone,
-        personal_message, theme, unique_share_link, payment_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending')
-     RETURNING id`,
-    [
-      userId,
-      merchant_item_id || null,
-      custom_credit_amount ? parseFloat(custom_credit_amount) : null,
-      custom_credit_amount ? (custom_credit_currency || 'USD') : null,
-      custom_credit_merchant_id || null,
-      sender_name || null,
-      recipient_name || null,
-      recipient_phone || null,
-      personal_message || null,
-      theme || null,
-      shareCode,
-    ]
-  );
-
-  const giftSentId = sentResult.rows[0].id;
+  // Create pending gifts_sent record. The partial unique index enforces one
+  // pending charge per draft; a concurrent/duplicate attempt raises 23505,
+  // which we translate into the idempotent response (or a 409 if its charge is
+  // no longer resolvable).
+  let giftSentId;
+  try {
+    const sentResult = await query(
+      `INSERT INTO gifts_sent
+         (sender_user_id, merchant_item_id,
+          custom_credit_amount, custom_credit_currency, custom_credit_merchant_id,
+          sender_name, recipient_name, recipient_phone,
+          personal_message, theme, unique_share_link, gift_draft_id, payment_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending')
+       RETURNING id`,
+      [
+        userId,
+        merchant_item_id || null,
+        custom_credit_amount ? parseFloat(custom_credit_amount) : null,
+        custom_credit_amount ? (custom_credit_currency || 'USD') : null,
+        custom_credit_merchant_id || null,
+        sender_name || null,
+        recipient_name || null,
+        recipient_phone || null,
+        personal_message || null,
+        theme || null,
+        shareCode,
+        gift_draft_id || null,
+      ]
+    );
+    giftSentId = sentResult.rows[0].id;
+  } catch (err) {
+    if (err.code === '23505' && gift_draft_id) {
+      // A pending charge for this draft already exists (race, or a prior attempt
+      // whose Tap session is still open). Return it idempotently.
+      const existing = await query(
+        `SELECT id, tap_charge_id, unique_share_link FROM gifts_sent
+         WHERE gift_draft_id = $1 AND payment_status = 'pending' LIMIT 1`,
+        [gift_draft_id]
+      );
+      if (existing.rows.length) {
+        const row = existing.rows[0];
+        const { getTapCharge } = require('./paymentService');
+        try {
+          const charge = await getTapCharge(row.tap_charge_id);
+          if (charge?.transaction?.url) {
+            logger.info('Draft idempotency backstop (23505) returned existing pending gift', { giftSentId: row.id, giftDraftId: gift_draft_id });
+            return {
+              gift_sent_id: row.id,
+              tap_transaction_url: charge.transaction.url,
+              unique_share_link: row.unique_share_link,
+              amount,
+              currency,
+            };
+          }
+        } catch (_) { /* fall through to 409 */ }
+        throw new AppError('A payment is already in progress for this gift. Please try again in a moment.', 409, 'PAYMENT_IN_PROGRESS');
+      }
+    }
+    throw err;
+  }
 
   // Build webhook + redirect URLs
   const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3000}`;
@@ -641,9 +371,35 @@ async function initiateGiftPayment(userId, {
  */
 async function fulfillGiftFromTap(tapChargeId) {
   return withTransaction(async (client) => {
-    // Find the pending gift
+    // Find the gift to fulfil. FOR UPDATE serializes concurrent webhook/confirm
+    // calls: the first locks and fulfils, the second re-reads and matches
+    // neither branch, so fulfilment runs exactly once.
+    //   Branch 1: a normal 'pending' row.
+    //   Branch 2: a 'failed' row re-opened by a genuine late capture — only when
+    //     (a) no gift_instance exists yet, and (b) a CAPTURED payload is on file
+    //     in payment_webhooks for this charge (proof the capture was real).
+    // The NOT EXISTS on gift_instances is load-bearing: 'failed' is also set by
+    // the ordinary Tap failure path, so a DECLINED-then-CAPTURED sequence could
+    // reach branch 2; without it a duplicate gift_instances row would be created.
     const giftResult = await client.query(
-      `SELECT * FROM gifts_sent WHERE tap_charge_id = $1 AND payment_status = 'pending'`,
+      `SELECT gs.*
+       FROM gifts_sent gs
+       WHERE gs.tap_charge_id = $1
+         AND (
+               gs.payment_status = 'pending'
+            OR (
+                 gs.payment_status = 'failed'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM gift_instances gi WHERE gi.gift_sent_id = gs.id
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM payment_webhooks pw
+                   WHERE pw.charge_id = gs.tap_charge_id
+                     AND pw.status = 'CAPTURED'
+                 )
+               )
+         )
+       FOR UPDATE`,
       [tapChargeId]
     );
 
@@ -732,6 +488,57 @@ async function fulfillGiftFromTap(tapChargeId) {
     logger.info('Gift fulfilled from Tap payment', { giftSentId: gift.id, tapChargeId });
     return gift;
   });
+}
+
+/**
+ * Shape a gifts_sent row into the public payment-state payload.
+ *
+ * unique_share_link is only returned once payment_status = 'paid' — a share
+ * link IS the gift (the public /gift/:shareCode page renders it), so it is
+ * never exposed for an unpaid row. Single place so both payment-state readers
+ * apply the rule identically.
+ */
+function _toPaymentState(row) {
+  if (!row) return null;
+  const { payment_status, unique_share_link } = row;
+  return {
+    payment_status,
+    unique_share_link: payment_status === 'paid' ? unique_share_link : null,
+  };
+}
+
+/**
+ * Read the authoritative payment state of the gift behind a Tap charge.
+ *
+ * Scoped to the requesting sender: one user must never be able to read
+ * another's share link by guessing a tap_charge_id.
+ */
+async function getPaymentStateByChargeId(tapChargeId, userId) {
+  const result = await query(
+    `SELECT payment_status, unique_share_link
+     FROM gifts_sent
+     WHERE tap_charge_id = $1 AND sender_user_id = $2`,
+    [tapChargeId, userId]
+  );
+  return _toPaymentState(result.rows[0]);
+}
+
+/**
+ * Read the current payment state of a gifts_sent row by id.
+ *
+ * Pure read: does NOT verify the charge with Tap and does NOT trigger
+ * fulfilment. A row that is still 'pending' is reported as pending — the caller
+ * decides whether to keep waiting. Same ownership scoping as the charge-id
+ * reader: a gift that is not yours reads as not-found.
+ */
+async function getPaymentStateByGiftSentId(giftSentId, userId) {
+  const result = await query(
+    `SELECT payment_status, unique_share_link
+     FROM gifts_sent
+     WHERE id = $1 AND sender_user_id = $2`,
+    [giftSentId, userId]
+  );
+  return _toPaymentState(result.rows[0]);
 }
 
 /**
@@ -835,16 +642,13 @@ async function deleteRetryDraft(draftId, userId) {
 }
 
 module.exports = {
-  createDraft,
-  updateDraft,
-  getDraftPreview,
-  sendFromDraft,
-  sendGiftDirect,
   getSentGifts,
   getReceivedGifts,
   claimGift,
   initiateGiftPayment,
   fulfillGiftFromTap,
+  getPaymentStateByChargeId,
+  getPaymentStateByGiftSentId,
   failGiftFromTap,
   saveRetryDraft,
   getRetryDraft,

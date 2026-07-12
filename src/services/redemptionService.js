@@ -202,22 +202,8 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
       ]
     );
 
-    // Log transaction for the wallet owner
+    // Notify the wallet owner
     if (instance.wallet_owner_id) {
-      await client.query(
-        `INSERT INTO transactions
-           (user_id, transaction_type, related_entity_type, related_entity_id,
-            amount, currency_code, status, description)
-         VALUES ($1, 'gift_redeemed', 'gift_instance', $2, $3, $4, 'completed', $5)`,
-        [
-          instance.wallet_owner_id,
-          instance.id,
-          amount_to_redeem || null,
-          instance.currency_code,
-          `${instance.gift_card_name} redeemed at merchant`,
-        ]
-      );
-
       await notificationService.createNotification(client, {
         userId: instance.wallet_owner_id,
         type: 'gift_redeemed',

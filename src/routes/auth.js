@@ -10,7 +10,6 @@ const {
   verifyEmailValidation,
   forgotPasswordValidation,
   resetPasswordValidation,
-  socialLoginValidation,
 } = require('../utils/validators');
 
 /**
@@ -168,30 +167,6 @@ router.post('/forgot-password', authLimiter, forgotPasswordValidation, validate,
  */
 router.post('/reset-password', authLimiter, resetPasswordValidation, validate, authController.resetPassword);
 
-/**
- * @swagger
- * /auth/social-login:
- *   post:
- *     tags: [Auth]
- *     summary: Login with Google or Apple
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [provider, id_token]
- *             properties:
- *               provider:
- *                 type: string
- *                 enum: [google, apple]
- *               id_token:
- *                 type: string
- *     responses:
- *       200:
- *         description: Login successful
- */
-router.post('/social-login', authLimiter, socialLoginValidation, validate, authController.socialLogin);
 router.post('/send-phone-otp', authLimiter, authController.sendPhoneOtp);
 router.post('/verify-phone-otp', authLimiter, authController.verifyPhoneOtp);
 

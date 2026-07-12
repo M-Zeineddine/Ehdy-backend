@@ -6,20 +6,32 @@ services:
     ports:
       - '3000:3000'
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/kado_db
       - REDIS_URL=redis://redis:6379
+      # Dev-only placeholder secrets. NEVER use in production — A5 env validation
+      # refuses to boot with placeholder/short secrets when NODE_ENV=production.
+      - JWT_SECRET=dev-insecure-jwt-secret-change-me-0123456789abcd
+      - JWT_REFRESH_SECRET=dev-insecure-refresh-secret-change-me-0123456789
+      - TAP_SECRET_KEY=dev_placeholder_tap_key
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Apply ALL migrations through the runner (recorded in _migrations), then start.
+    # The previous setup mounted only 001_initial_schema.sql into initdb, so a
+    # `docker compose up` database was missing everything after 001.
+    # Seed separately once it's up:  docker compose run --rm app npm run seed
+    command: sh -c "npm run migrate:up && node src/index.js"
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
 
   db:
-    image: postgres:14-alpine
+    # Match production (PostgreSQL 17.6). If you previously ran the pg14 volume,
+    # recreate it first: docker compose down -v
+    image: postgres:17-alpine
     environment:
       POSTGRES_DB: kado_db
       POSTGRES_USER: postgres
@@ -28,7 +40,6 @@ services:
       - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./src/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 10s

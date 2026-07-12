@@ -10,6 +10,7 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 const cors = require('cors');
 
+const { validateEnv } = require('./config/validateEnv');
 const httpLogger = require('./middleware/logger');
 const { generalLimiter } = require('./middleware/rateLimiter');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -19,13 +20,9 @@ const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const merchantRoutes = require('./routes/merchants');
-const giftCardRoutes = require('./routes/giftCards');
-const walletRoutes = require('./routes/wallet');
-const bundleRoutes = require('./routes/bundles');
 const giftRoutes = require('./routes/gifts');
 const notificationRoutes = require('./routes/notifications');
 const merchantPortalRoutes = require('./routes/merchantPortal');
-const analyticsRoutes = require('./routes/analytics');
 const webhookRoutes = require('./routes/webhooks');
 const giftPageRoutes = require('./routes/giftPage');
 const adminRoutes = require('./routes/admin');
@@ -76,7 +73,7 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g. mobile apps, curl)
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: Origin ${origin} not allowed`));
@@ -89,8 +86,8 @@ app.use(
 );
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '200kb' }));
+app.use(express.urlencoded({ extended: true, limit: '200kb' }));
 
 // ─── HTTP Logging ─────────────────────────────────────────────────────────────
 app.use(httpLogger);
@@ -118,31 +115,15 @@ app.get('/health', async (req, res) => {
   });
 });
 
-// ─── Email Test (remove before production launch) ─────────────────────────────
-app.get('/test-email/:to', async (req, res) => {
-  const { to } = req.params;
-  try {
-    const { sendEmail } = require('./services/emailService');
-    await sendEmail({ to, subject: 'Ehdy email test', html: '<h1>It works!</h1><p>Email delivery is configured correctly.</p>' });
-    res.json({ ok: true, message: `Test email sent to ${to}` });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/v1/auth', authRoutes);
 app.use('/v1/users', userRoutes);
 app.use('/v1/merchants', merchantRoutes);
-app.use('/v1/gift-cards', giftCardRoutes);
-app.use('/v1/wallet', walletRoutes);
-app.use('/v1/bundles', bundleRoutes);
 app.use('/v1/gifts', giftRoutes);
 app.use('/v1/notifications', notificationRoutes);
 app.use('/v1/merchant', merchantPortalRoutes);
-app.use('/v1/analytics', analyticsRoutes);
 app.use('/v1/webhooks', webhookRoutes);
-app.use('/gift', giftPageRoutes);
+app.use('/gift', generalLimiter, giftPageRoutes);
 app.use('/v1/admin', adminRoutes);
 
 // ─── CMS Static Files ─────────────────────────────────────────────────────────
@@ -179,6 +160,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 async function startServer() {
   try {
+    // Validate environment before doing anything else
+    validateEnv();
+
     // Test database connection
     const pool = require('./config/database');
     await pool.query('SELECT 1');
@@ -200,8 +184,12 @@ async function startServer() {
       try {
         const { scheduleCheckExpiringGifts } = require('./jobs/checkExpiringGifts');
         const { scheduleSyncMerchantBalances } = require('./jobs/syncMerchantBalances');
+        const { scheduleReconcileWebhooks } = require('./jobs/reconcileWebhooks');
+        const { scheduleSweepStalePendingGifts } = require('./jobs/sweepStalePendingGifts');
         scheduleCheckExpiringGifts();
         scheduleSyncMerchantBalances();
+        scheduleReconcileWebhooks();
+        scheduleSweepStalePendingGifts();
         logger.info('Background jobs scheduled');
       } catch (jobErr) {
         logger.warn('Failed to schedule background jobs', { error: jobErr.message });

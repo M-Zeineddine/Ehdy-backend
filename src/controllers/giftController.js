@@ -5,60 +5,6 @@ const paymentService = require('../services/paymentService');
 const { AppError } = require('../middleware/errorHandler');
 const { successResponse, paginatedResponse } = require('../utils/formatters');
 
-const createDraft = async (req, res, next) => {
-  try {
-    const draft = await giftService.createDraft(req.userId, req.body);
-    return successResponse(res, { draft }, 'Gift draft created.', 201);
-  } catch (err) {
-    return next(err);
-  }
-};
-
-const updateDraft = async (req, res, next) => {
-  try {
-    const draft = await giftService.updateDraft(req.params.draft_id, req.userId, req.body);
-    return successResponse(res, { draft }, 'Draft updated.');
-  } catch (err) {
-    return next(err);
-  }
-};
-
-const getDraftPreview = async (req, res, next) => {
-  try {
-    const draft = await giftService.getDraftPreview(req.params.draft_id, req.userId);
-    return successResponse(res, { draft });
-  } catch (err) {
-    return next(err);
-  }
-};
-
-const sendFromDraft = async (req, res, next) => {
-  try {
-    const { stripe_payment_intent_id } = req.body;
-    const result = await giftService.sendFromDraft(req.params.draft_id, req.userId, {
-      stripe_payment_intent_id,
-    });
-    return successResponse(res, {
-      gift_instance: result.giftInstance,
-      share_code: result.shareCode,
-    }, 'Gift sent successfully!');
-  } catch (err) {
-    return next(err);
-  }
-};
-
-const sendGift = async (req, res, next) => {
-  try {
-    const result = await giftService.sendGiftDirect(req.userId, req.body);
-    return successResponse(res, {
-      gift_instance: result.giftInstance,
-      share_code: result.shareCode,
-    }, 'Gift sent successfully!', 201);
-  } catch (err) {
-    return next(err);
-  }
-};
-
 const getSentGifts = async (req, res, next) => {
   try {
     const { page, limit, sort_order } = req.query;
@@ -136,20 +82,45 @@ const confirmPayment = async (req, res, next) => {
       return next(new AppError('Charge not captured', 400, 'PAYMENT_NOT_CAPTURED'));
     }
 
+    // Idempotent: returns null if the webhook already fulfilled this charge, so
+    // read the authoritative gifts_sent state afterwards rather than trusting
+    // this return value.
     await giftService.fulfillGiftFromTap(tap_id);
-    return successResponse(res, {}, 'Gift fulfilled.');
+
+    const state = await giftService.getPaymentStateByChargeId(tap_id, req.userId);
+    if (!state) {
+      return next(new AppError('Gift not found for this charge', 404, 'GIFT_NOT_FOUND'));
+    }
+
+    // state.unique_share_link is null unless payment_status === 'paid'.
+    return successResponse(res, state, 'Gift fulfilled.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * GET /v1/gifts/:id/payment-status
+ * Pure read of the current gifts_sent state — does not verify the charge with
+ * Tap and does not trigger fulfilment. 'pending' is a valid answer; the caller
+ * decides whether to wait.
+ */
+const getPaymentStatus = async (req, res, next) => {
+  try {
+    const state = await giftService.getPaymentStateByGiftSentId(req.params.id, req.userId);
+    if (!state) {
+      return next(new AppError('Gift not found', 404, 'GIFT_NOT_FOUND'));
+    }
+    // state.unique_share_link is null unless payment_status === 'paid'.
+    return successResponse(res, state);
   } catch (err) {
     return next(err);
   }
 };
 
 module.exports = {
-  createDraft,
-  updateDraft,
-  getDraftPreview,
-  sendFromDraft,
-  sendGift,
   getSentGifts,
+  getPaymentStatus,
   getReceivedGifts,
   claimGift,
   initiatePayment,
