@@ -112,12 +112,19 @@ const tapWebhook = async (req, res) => {
 
   // Persist the raw payload BEFORE acknowledging, so a crash mid-processing
   // never loses the event — the reconciliation job re-drives unprocessed rows.
+  //
+  // [TEMP-DIAGNOSTIC — REVERT AFTER CAPTURE] Tap sends the signature as an HTTP
+  // header (hashstring), not in the body, so verifyTapSignature (which reads
+  // charge.hashstring) always rejects. We stash req.headers under _tap_headers
+  // to learn the exact header name/shape from one sandbox webhook. The extra key
+  // is ignored by verify/fulfil/reconcile (they read charge.id/status/etc.).
+  const diagnosticPayload = { ...charge, _tap_headers: req.headers };
   let webhookRowId = null;
   try {
     const ins = await query(
       `INSERT INTO payment_webhooks (provider, charge_id, status, raw_payload, processed)
        VALUES ('tap', $1, $2, $3, FALSE) RETURNING id`,
-      [chargeId, status, JSON.stringify(charge)]
+      [chargeId, status, JSON.stringify(diagnosticPayload)]
     );
     webhookRowId = ins.rows[0].id;
   } catch (logErr) {
