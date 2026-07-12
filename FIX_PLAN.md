@@ -76,7 +76,7 @@ In development, log loud warnings instead of throwing.
 **File:** `src/routes/webhooks.js` (`verifyTapSignature`, ~15–41), `src/config/tap.js`.
 **Change:** Remove the `return true` when `TAP_SECRET_KEY` is unset. Missing key in production = handled by A5 boot check; in the verifier itself, missing key must return `false` (reject). Add a length/hex-format guard on the incoming `hashstring` before `Buffer.from(x, 'hex')`/`timingSafeEqual` so malformed input is rejected without relying on the thrown-exception path.
 **Commit:** `fix(webhooks): tap signature verification fails closed; guard hashstring format`
-**STATUS:** DONE (commit bb1cea8).
+**STATUS:** ⚠️ **SUPERSEDED by A16 (2026-07-12).** A6's fail-closed *signature verification* is **removed entirely** — `verifyTapSignature` is deleted. The verifier never actually validated a real Tap webhook (it read `hashstring` from the body; Tap sends it as an HTTP header), and the control is intentionally retired in favour of authoritative charge-retrieve. **There is no webhook signature verification anymore.** See A16. (The original A6 commit bb1cea8 shipped; A16 reverses the approach.)
 
 ## A7 — [STOP-GATE] Migration: draft-keyed payment idempotency
 **Severity:** Critical — this is the schema half of the double-charge fix. **STOP and show the human the migration SQL before applying anything.**
@@ -295,7 +295,8 @@ Method: fresh `postgres:17-alpine` → `migrate:up` ran all 17 files cleanly (pr
 ## A16 — Tap webhook verification: fulfil from authoritative charge-retrieve (NOT signature)
 **Severity:** Blocking — real Tap sandbox webhooks were rejected, so no payment could be fulfilled via webhook.
 **Root cause:** `verifyTapSignature` read `charge.hashstring` from the **body**, but Tap sends the signature as an HTTP **header**; proven against two stored sandbox payloads (`hashstring` absent top-level and nested; the strings "hash"/"signature" appear nowhere; `live_mode=false`). The verifier had therefore never validated a real webhook — pre-A6 the `if (!secret) return true` fail-open (with `TAP_SECRET_KEY` unset in prod) masked it; A5 forcing the key + A6 removing fail-open exposed it. The compute was also wrong (`id|amount|currency|status` vs Tap's `x_id…x_amount…` HMAC).
-**Decision (human, 2026-07-12):** treat the webhook body as an **untrusted trigger** and fulfil on a **re-fetched authoritative charge** (`GET /v2/charges/{id}`, our secret key). **hashstring HMAC verification is deliberately DROPPED — not silently skipped.** A byte-imperfect formula (amount decimals, empty `gateway_reference`, `transaction.created`, field order) that fulfilment doesn't gate on would be log noise that can cry wolf on valid webhooks; if a real second factor is ever wanted, build it deliberately later using the captured header. One authority: charge-retrieve. No `live_mode` gate (it's in the untrusted body; any gate keys off server-side `NODE_ENV`, never a body field — and none is needed).
+**Decision (human, 2026-07-12):** treat the webhook body as an **untrusted trigger** and fulfil on a **re-fetched authoritative charge** (`GET /v2/charges/{id}`, our secret key). **hashstring HMAC verification is deliberately DROPPED — not silently skipped.**
+**A16 SUPERSEDES A6.** A6 added fail-closed *signature verification*; A16 **retires that control entirely** — `verifyTapSignature` is deleted, and there is no longer any webhook signature check (same explicit-retirement treatment as A7's `payment_webhooks` CAPTURED-EXISTS branch). A security control is being removed; recording it here so no future reader assumes signature verification still exists. The single authority is now the charge-retrieve. A byte-imperfect formula (amount decimals, empty `gateway_reference`, `transaction.created`, field order) that fulfilment doesn't gate on would be log noise that can cry wolf on valid webhooks; if a real second factor is ever wanted, build it deliberately later using the captured header. One authority: charge-retrieve. No `live_mode` gate (it's in the untrusted body; any gate keys off server-side `NODE_ENV`, never a body field — and none is needed).
 **Step-1 hash inputs (recorded, for a future deliberate signature build only):** `currency=USD` (→ amount formats to 2 decimals), `reference.gateway` absent (→ empty string), `reference.payment` populated, `transaction.created` populated (Unix-ms).
 
 ## A17 — Implement charge-retrieve fulfilment (all four behaviours load-bearing)
@@ -316,7 +317,7 @@ Supersedes A7's `payment_webhooks` CAPTURED-EXISTS re-open branch — the author
 **STATUS:** DONE (staged on the diagnostic branch).
 
 ## [TEMP] Header-capture diagnostic (revert after capture)
-On `diag/tap-webhook-headers`: persists `req.headers` under `raw_payload._tap_headers` for one sandbox webhook, to record on-file whether/where Tap's sandbox sends `hashstring`. **A17 removes it** (charge-retrieve doesn't need it). Deploy `diag` → run one sandbox payment → read `_tap_headers` → then A17 supersedes.
+On `diag/tap-webhook-headers` **only**: persists the incoming `req.headers` on the stored webhook payload (a temporary diagnostic key) for one sandbox webhook, to record whether/where Tap's sandbox sends the signature header. **A17 removes it** (charge-retrieve doesn't need it) so it never reaches `main`. Deploy `diag` → run one sandbox payment → read the captured headers → then A17 supersedes. (The literal capture-key identifier is kept out of this doc so `git grep <that-key> main` is a clean leak gate.)
 
 ---
 
