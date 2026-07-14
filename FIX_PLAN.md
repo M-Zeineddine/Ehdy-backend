@@ -416,6 +416,8 @@ try {
 - Refresh-token rotation + jti denylist.
 - Admin routes refactor onto controllers/services + wiring all `admin*Validation`.
 - Gifts tab → `useInfiniteQuery`; React Query focus/online managers; `expo-image` migration; dead starter tree removal; ar.json missing keys + merchant portal i18n; ship-or-delete inert UI (whish selector, popular grid, profile rows).
+- **languageStore `isLoading` gate** (declined during F8 to keep the diff scoped): first paint is gated on the auth stores but not on `loadLanguage`, so a theoretical race can paint one frame in the boot language before the store's `set()` re-renders the tree (self-correcting; pre-existing, not F8-introduced). A ~4-line `isLoading` flag on `languageStore` mirroring the auth stores' gate in `_layout.tsx` guarantees no flash.
+- **Frontend residual `npm audit --omit=dev`: ~25 advisories (shell-quote critical; tar/undici/ws/node-forge/xmldom/picomatch highs)** — all live in the Expo CLI/dev chain that npm classifies as prod via `expo`'s own dependencies; none of it ships in the app bundle. The fixes are `isSemVerMajor` Expo SDK bumps, i.e. gated behind the deferred SDK upgrade above. The genuinely runtime advisories (axios ×2 high, form-data high) were fixed in F8 (`axios ^1.18.1`, `form-data 4.0.6`).
 - Schema/migrations reconciliation into an authoritative baseline (`pg_dump --schema-only` vs `migrations/`).
 - Remove dead deps: backend (`stripe`, `twilio`, `@sendgrid/mail`, `bull` if confirmed unused) and frontend (`react-native-webview`, `expo-haptics`, `expo-symbols`).
 - Seed rework: `seeds/*` insert into the dropped `gift_cards` table — reseeding is broken; rebuild seeds onto `merchant_items`/`store_credit_presets`.
