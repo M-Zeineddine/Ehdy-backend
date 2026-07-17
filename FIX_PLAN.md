@@ -4,6 +4,14 @@
 **Sources:** Backend audit (Phase 1 + 2), Frontend audit (Phase 1 + 2), live production schema dump.
 **Repos:** `ehdy-backend` (Express + pg) and the Expo/React Native app.
 
+## CURRENT STATE (verified 2026-07-15 — supersedes any conflicting per-item note below, incl. the 2026-07-09 "Confirmed facts")
+
+- **Prod DB (probed live, read-only):** `_migrations` = **20 rows** — 001–016 baselined 2026-07-09 18:45 (one-shot ledger INSERT), **017 + 018 applied via `migrate:up`** 2026-07-09 18:50, **019 applied via runner** 2026-07-10. `gifts_sent.gift_draft_id` (uuid) exists with partial unique index `gifts_sent_one_pending_per_draft` (`WHERE payment_status='pending' AND gift_draft_id IS NOT NULL`); `idx_notifications_entity` exists; `merchants.is_featured` is NOT NULL. **No pre-deploy migration step is outstanding.**
+- **Backend `main`:** Part A closed (A1–A18; A16/A17 charge-retrieve fulfilment and A18 trust-proxy are merged, not just staged). C1 endpoints (`confirm-payment` payload, `GET /gifts/:id/payment-status`) live in code.
+- **App `master` (`Ehdy-app.git`):** Part B closed — F1–F8 merged non-squash + C1 client work; CI gates tsc + eslint; pushed.
+- **Deployed: nothing.** Render deploy of backend `main` pending; first store build (`eas build`) pending; the app has **no OTA channel**, so releases are store builds only.
+- Connection note: prod access still uses the `postgres` superuser — Part D least-privilege item remains open.
+
 ## Rules of engagement (read first, apply to every item)
 
 - Work through items **one at a time, in order**. Do not batch multiple items into one edit.
@@ -270,7 +278,7 @@ INSERT INTO _migrations (filename) VALUES
   ('016_drop_store_credit_preset_id.sql')
 ON CONFLICT (filename) DO NOTHING;
 ```
-**STATUS:** DIFF DONE (2026-07-09). Baseline INSERT lives at `scripts/baseline_ledger.sql` (one-time, prod only, never in migrations/). **Not run.**
+**STATUS:** DONE — baseline **RUN on prod 2026-07-09 18:45** (verified against the live DB 2026-07-15: ledger = 20 rows; 017/018 via `migrate:up` same day, 019 via runner 2026-07-10). Baseline INSERT lives at `scripts/baseline_ledger.sql` (one-time, prod only, never in migrations/).
 
 ### A15 diff result (repo migrations vs `pg_dump --schema-only` of prod 17.6)
 Method: fresh `postgres:17-alpine` → `migrate:up` ran all 17 files cleanly (proving the runner works) → `pg_dump` both with identical flags → normalized order-insensitive diff. **1,428 of 1,430 lines identical.** The repo migrations reproduce production; every table/column/type/enum/check/default/FK/index matches. **Exactly two deltas:**
@@ -280,12 +288,13 @@ Method: fresh `postgres:17-alpine` → `migrate:up` ran all 17 files cleanly (pr
 ### Renumbering (A8 void frees 017)
 - `017_merchants_is_featured_not_null.sql` — NEW: `UPDATE merchants SET is_featured=false WHERE is_featured IS NULL;` then `ALTER COLUMN is_featured SET NOT NULL`. Prod null count = 0 (verified), so a clean no-op UPDATE + enforce. Safe on fresh DBs (already NOT NULL). This is the runner's first real job on prod.
 - `018_gift_draft_id_idempotency.sql` — the A7 work (was 017).
+- `019_notifications_entity_index.sql` — A14 follow-up: index on `notifications (related_entity_type, related_entity_id, type)` for the expiry-dedupe `NOT EXISTS`. Applied via runner 2026-07-10 (verified on prod).
 
 ### Corrected sequence
 1. **Void A8** — drop redundant constraint on prod (by hand); drafts deleted. ✅ drafts deleted
 2. **Fix `seed.js` + `docker-compose.yml`** ✅ done — seed rewritten onto merchant_items/store_credit_presets + end-to-end redemption fixture (verified against a fresh migrated DB, idempotent); compose removes the 001-only mount, matches PG17, runs migrate:up via the runner.
-3. **Baseline the ledger by hand** (`scripts/baseline_ledger.sql`) — the last paste, ever.
-4. **Promote 017 + 018** into `src/migrations/`, then **`migrate:up` against production** — that first successful runner-driven run is the proof.
+3. **Baseline the ledger by hand** (`scripts/baseline_ledger.sql`) — the last paste, ever. ✅ done 2026-07-09 (verified on prod 2026-07-15)
+4. **Promote 017 + 018** into `src/migrations/`, then **`migrate:up` against production** — that first successful runner-driven run is the proof. ✅ done 2026-07-09; 019 followed via the runner 2026-07-10
 5. Rebuild the fresh DB from scratch (`docker compose down -v` + up + seed) as the final test.
 
 ---
@@ -311,12 +320,12 @@ Method: fresh `postgres:17-alpine` → `migrate:up` ran all 17 files cleanly (pr
 Supersedes A7's `payment_webhooks` CAPTURED-EXISTS re-open branch — the authoritative fetch is now the proof of capture (the `NOT EXISTS gift_instances` guard stays, still load-bearing against duplicate instances). Webhook route protection is now rate-limiting (`generalLimiter` on `/v1/`) + the DB-gate, which A18 makes see real client IPs.
 **Verify:** 8-scenario harness on a fresh DB (mocked `getTapCharge`): DB-gate/no-call, transient-throws, FAILED-not-fulfilled, amount & currency mismatch not-fulfilled, valid capture → paid + 1 instance + exactly 1 fetch, idempotent replay no-call, `processTapWebhook` transient→processed=false / terminal→processed=true. All pass.
 **Commit:** `fix(webhooks): fulfil from authoritative Tap charge-retrieve; drop signature verification (A16/A17)`
-**STATUS:** IMPLEMENTED on branch `fix/tap-charge-retrieve` (off `diag/…`). Staged, not deployed.
+**STATUS:** MERGED to `main` (`6707d85`). Deploy to Render pending.
 
 ## A18 — Trust first proxy hop (Render)
 **Change:** `app.set('trust proxy', 1)` so `req.ip`/`X-Forwarded-For` resolve to the real client behind Render's proxy and `express-rate-limit` stops warning. `1` trusts only the immediate hop.
 **Commit:** `fix(server): trust first proxy hop (Render) for correct client IP (A18)` (`b174881`, on `diag/…`).
-**STATUS:** DONE (staged on the diagnostic branch).
+**STATUS:** DONE — merged to `main` (`b174881`). Deploy to Render pending.
 
 ## [TEMP] Header-capture diagnostic (revert after capture)
 On `diag/tap-webhook-headers` **only**: persists the incoming `req.headers` on the stored webhook payload (a temporary diagnostic key) for one sandbox webhook, to record whether/where Tap's sandbox sends the signature header. **A17 removes it** (charge-retrieve doesn't need it) so it never reaches `main`. Deploy `diag` → run one sandbox payment → read the captured headers → then A17 supersedes. (The literal capture-key identifier is kept out of this doc so `git grep <that-key> main` is a clean leak gate.)
@@ -420,8 +429,8 @@ try {
 - **Frontend residual `npm audit --omit=dev`: ~25 advisories (shell-quote critical; tar/undici/ws/node-forge/xmldom/picomatch highs)** — all live in the Expo CLI/dev chain that npm classifies as prod via `expo`'s own dependencies; none of it ships in the app bundle. The fixes are `isSemVerMajor` Expo SDK bumps, i.e. gated behind the deferred SDK upgrade above. The genuinely runtime advisories (axios ×2 high, form-data high) were fixed in F8 (`axios ^1.18.1`, `form-data 4.0.6`).
 - Schema/migrations reconciliation into an authoritative baseline (`pg_dump --schema-only` vs `migrations/`).
 - Remove dead deps: backend (`stripe`, `twilio`, `@sendgrid/mail`, `bull` if confirmed unused) and frontend (`react-native-webview`, `expo-haptics`, `expo-symbols`).
-- Seed rework: `seeds/*` insert into the dropped `gift_cards` table — reseeding is broken; rebuild seeds onto `merchant_items`/`store_credit_presets`.
-- **Test suites for everything fixed above** — separate follow-up task (interceptor suite, `decidePaymentOutcome` table test, phone normalizer, redemption e2e, webhook signature + fail-closed, wallet_items uniqueness).
+- ~~Seed rework~~ — DONE under A15 corrected-sequence step 2 (seeds rewritten onto `merchant_items`/`store_credit_presets`, verified on a fresh migrated DB).
+- **Test suites for everything fixed above** — separate follow-up task (interceptor suite, `decidePaymentOutcome` table test, phone normalizer, redemption e2e, **webhook charge-retrieve fulfilment** — verify-then-fulfil, DECLINED path, reconciliation dedupe; signature verification was retired in A16 — and wallet_items uniqueness).
 
 ---
 
