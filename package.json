@@ -15,6 +15,7 @@
     "test:coverage": "jest --runInBand --coverage",
     "migrate:up": "node src/migrations/run.js up",
     "seed": "node src/seeds/seed.js",
+    "seed:pagination": "node src/seeds/seed.js --pagination",
     "lint": "eslint src/ --ext .js",
     "build": "cd cms && npm install && npm run build",
     "cms:install": "cd cms && npm install",
