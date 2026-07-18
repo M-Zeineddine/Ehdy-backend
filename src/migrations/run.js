@@ -3,8 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-
+require('dotenv').config({
+  path: process.env.ENV_FILE || path.join(__dirname, '../../.env')
+});
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   host: process.env.DB_HOST || 'localhost',
