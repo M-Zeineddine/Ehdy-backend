@@ -17,7 +17,7 @@ const login = async (req, res, next) => {
 
 const getDashboard = async (req, res, next) => {
   try {
-    const dashboard = await merchantPortalService.getMerchantDashboard(req.merchantId);
+    const dashboard = await merchantPortalService.getMerchantDashboard(req.merchantId, req.branchIds);
     return successResponse(res, { dashboard });
   } catch (err) {
     return next(err);
@@ -77,6 +77,7 @@ const getRedemptions = async (req, res, next) => {
       limit,
       date_from,
       date_to,
+      branchIds: req.branchIds,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);
   } catch (err) {

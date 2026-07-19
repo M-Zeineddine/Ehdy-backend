@@ -2,7 +2,7 @@
 
 const router = require('express').Router();
 const merchantPortalController = require('../controllers/merchantPortalController');
-const { authenticateMerchant } = require('../middleware/auth');
+const { authenticateMerchant, requireMerchantRole } = require('../middleware/auth');
 const { authLimiter, redemptionLimiter } = require('../middleware/rateLimiter');
 const { validate } = require('../middleware/validation');
 const {
@@ -119,7 +119,7 @@ router.use(authenticateMerchant);
  *       200:
  *         description: Paginated redemption history
  */
-router.get('/dashboard', merchantPortalController.getDashboard);
+router.get('/dashboard', requireMerchantRole('owner', 'manager'), merchantPortalController.getDashboard);
 router.post(
   '/validate-redemption',
   redemptionLimiter,
@@ -136,6 +136,6 @@ router.post(
   validate,
   merchantPortalController.confirmRedemption
 );
-router.get('/redemptions', paginationValidation, validate, merchantPortalController.getRedemptions);
+router.get('/redemptions', requireMerchantRole('owner', 'manager'), paginationValidation, validate, merchantPortalController.getRedemptions);
 
 module.exports = router;

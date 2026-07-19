@@ -240,7 +240,7 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
 /**
  * Get redemption history for a merchant.
  */
-async function getMerchantRedemptions(merchantId, { page, limit, date_from, date_to }) {
+async function getMerchantRedemptions(merchantId, { page, limit, date_from, date_to, branchIds = null }) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
 
@@ -250,6 +250,11 @@ async function getMerchantRedemptions(merchantId, { page, limit, date_from, date
 
   if (date_from) { conditions.push(`gi.redeemed_at >= $${idx++}`); params.push(date_from); }
   if (date_to)   { conditions.push(`gi.redeemed_at <= $${idx++}`); params.push(date_to); }
+  if (branchIds) {
+    conditions.push(`EXISTS (SELECT 1 FROM redemption_events re
+                             WHERE re.gift_instance_id = gi.id AND re.branch_id = ANY($${idx++}))`);
+    params.push(branchIds);
+  }
 
   const whereClause = conditions.join(' AND ');
 

@@ -132,10 +132,27 @@ const authenticateMerchant = async (req, res, next) => {
       return next(new AppError('Merchant account is not active', 403, 'MERCHANT_INACTIVE'));
     }
 
+    // Branch scope: null = all branches (owners always; others with no
+    // assignment). Otherwise the list of branch ids the user is limited to.
+    let branchIds = null;
+    if (merchantUser.role !== 'owner') {
+      const branchRows = await query(
+        'SELECT branch_id FROM merchant_user_branches WHERE merchant_user_id = $1',
+        [merchantUser.id]
+      );
+      if (branchRows.rows.length > 0) {
+        branchIds = branchRows.rows.map((r) => r.branch_id);
+      } else if (merchantUser.branch_id) {
+        branchIds = [merchantUser.branch_id];
+      }
+    }
+
     req.merchant = merchantUser;
     req.merchantUserId = decoded.merchantUserId;
     req.merchantId = merchantUser.merchant_id;
-    req.branchId = merchantUser.branch_id || null;
+    req.branchIds = branchIds;
+    req.branchId = merchantUser.branch_id
+      || (branchIds && branchIds.length === 1 ? branchIds[0] : null);
     return next();
   } catch (err) {
     logger.warn('Merchant authentication failed', { error: err.message });
@@ -204,4 +221,19 @@ const requireOwnerRole = (req, _res, next) => {
   return next();
 };
 
-module.exports = { authenticate, optionalAuthenticate, authenticateMerchant, requireOwnerRole, authenticateAdmin };
+/**
+ * Require the authenticated merchant user to have one of the given roles.
+ * Must be used AFTER authenticateMerchant.
+ * Role is sourced from req.merchant (DB-fetched) — never from the JWT payload.
+ */
+const requireMerchantRole = (...roles) => (req, _res, next) => {
+  if (!req.merchant) {
+    return next(new AppError('Not authenticated', 401, 'NOT_AUTHENTICATED'));
+  }
+  if (!roles.includes(req.merchant.role)) {
+    return next(new AppError('Insufficient role for this action', 403, 'FORBIDDEN'));
+  }
+  return next();
+};
+
+module.exports = { authenticate, optionalAuthenticate, authenticateMerchant, requireOwnerRole, requireMerchantRole, authenticateAdmin };
