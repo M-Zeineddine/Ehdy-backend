@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Ehdy gifting platform backend API",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
