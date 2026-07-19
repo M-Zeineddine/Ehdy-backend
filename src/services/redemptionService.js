@@ -84,7 +84,40 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
 /**
  * Confirm and process a redemption.
  */
-async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id, branch_id }) {
+/**
+ * Resolve and validate the branch a redemption is attributed to.
+ * - A requested/default branch must belong to the merchant, be active, and
+ *   fall within the user's branch scope (when scoped).
+ * - If the merchant has active branches, a branch is required so sales
+ *   history stays attributable; merchants without branches redeem unattributed.
+ */
+async function resolveRedemptionBranch(merchantId, { branch_id, scoped_branch_ids }) {
+  if (branch_id) {
+    const branch = await query(
+      'SELECT id FROM merchant_branches WHERE id = $1 AND merchant_id = $2 AND is_active = TRUE',
+      [branch_id, merchantId]
+    );
+    if (branch.rows.length === 0) {
+      throw new AppError('Branch not found for this merchant', 400, 'INVALID_BRANCH');
+    }
+    if (scoped_branch_ids && !scoped_branch_ids.includes(branch_id)) {
+      throw new AppError('You are not assigned to this branch', 403, 'BRANCH_FORBIDDEN');
+    }
+    return branch_id;
+  }
+
+  const branches = await query(
+    'SELECT COUNT(*) FROM merchant_branches WHERE merchant_id = $1 AND is_active = TRUE',
+    [merchantId]
+  );
+  if (parseInt(branches.rows[0].count, 10) > 0) {
+    throw new AppError('branch_id is required: this merchant has branches', 400, 'BRANCH_REQUIRED');
+  }
+  return null;
+}
+
+async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id, branch_id, scoped_branch_ids }) {
+  const effectiveBranchId = await resolveRedemptionBranch(merchantId, { branch_id, scoped_branch_ids });
   // OTP_VERIFICATION_ENABLED: set to true to re-enable recipient OTP check
   const OTP_VERIFICATION_ENABLED = false;
   if (OTP_VERIFICATION_ENABLED) {
@@ -194,7 +227,7 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
         instance.id,
         merchantId,
         merchant_user_id || null,
-        branch_id || null,
+        effectiveBranchId,
         instance.type === 'store_credit' ? parseFloat(amount_to_redeem) : null,
         instance.currency_code,
         instance.type === 'store_credit' ? newBalance : null,

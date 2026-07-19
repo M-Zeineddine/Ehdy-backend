@@ -2,14 +2,20 @@
 
 const router = require('express').Router();
 const merchantPortalController = require('../controllers/merchantPortalController');
-const { authenticateMerchant, requireMerchantRole } = require('../middleware/auth');
+const { authenticateMerchant, requireMerchantRole, requireOwnerRole } = require('../middleware/auth');
 const { authLimiter, redemptionLimiter } = require('../middleware/rateLimiter');
 const { validate } = require('../middleware/validation');
 const {
   merchantLoginValidation,
   validateRedemptionValidation,
   confirmRedemptionValidation,
+  branchCreateValidation,
+  itemCreateValidation,
+  itemUpdateValidation,
+  staffCreateValidation,
+  staffUpdateValidation,
   paginationValidation,
+  uuidParamValidation,
 } = require('../utils/validators');
 
 /**
@@ -137,5 +143,24 @@ router.post(
   merchantPortalController.confirmRedemption
 );
 router.get('/redemptions', requireMerchantRole('owner', 'manager'), paginationValidation, validate, merchantPortalController.getRedemptions);
+
+// ─── Branches (list: any portal role — needed for the redemption branch picker) ─
+router.get('/branches', merchantPortalController.listBranches);
+router.post('/branches', requireOwnerRole, branchCreateValidation, validate, merchantPortalController.createBranch);
+router.patch('/branches/:id', requireOwnerRole, uuidParamValidation(), validate, merchantPortalController.updateBranch);
+
+// ─── Items ────────────────────────────────────────────────────────────────────
+router.get('/items', requireMerchantRole('owner', 'manager'), merchantPortalController.listItems);
+router.post('/items', requireOwnerRole, itemCreateValidation, validate, merchantPortalController.createItem);
+router.patch('/items/:id', requireOwnerRole, uuidParamValidation(), itemUpdateValidation, validate, merchantPortalController.updateItem);
+
+// ─── Staff (owner only) ───────────────────────────────────────────────────────
+router.get('/staff', requireOwnerRole, merchantPortalController.listStaff);
+router.post('/staff', requireOwnerRole, staffCreateValidation, validate, merchantPortalController.createStaff);
+router.patch('/staff/:id', requireOwnerRole, uuidParamValidation(), staffUpdateValidation, validate, merchantPortalController.updateStaff);
+
+// ─── Profile ──────────────────────────────────────────────────────────────────
+router.get('/profile', requireMerchantRole('owner', 'manager'), merchantPortalController.getProfile);
+router.patch('/profile', requireOwnerRole, merchantPortalController.updateProfile);
 
 module.exports = router;

@@ -2,7 +2,7 @@
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { query } = require('../utils/database');
+const { query, withTransaction } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -214,7 +214,269 @@ async function getMerchantDashboard(merchantId, branchIds = null) {
   };
 }
 
+// ─── Branches ─────────────────────────────────────────────────────────────────
+
+async function listBranches(merchantId) {
+  const result = await query(
+    `SELECT id, name, address, city, latitude, longitude, contact_phone, is_active, created_at
+     FROM merchant_branches WHERE merchant_id = $1 ORDER BY name`,
+    [merchantId]
+  );
+  return result.rows;
+}
+
+async function createBranch(merchantId, { name, address, city, latitude, longitude, contact_phone }) {
+  const result = await query(
+    `INSERT INTO merchant_branches (merchant_id, name, address, city, latitude, longitude, contact_phone)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, name, address, city, latitude, longitude, contact_phone, is_active, created_at`,
+    [merchantId, name, address || null, city || null, latitude || null, longitude || null, contact_phone || null]
+  );
+  return result.rows[0];
+}
+
+const BRANCH_FIELDS = ['name', 'address', 'city', 'latitude', 'longitude', 'contact_phone', 'is_active'];
+
+async function updateBranch(merchantId, branchId, data) {
+  const sets = [];
+  const params = [];
+  let idx = 1;
+  for (const field of BRANCH_FIELDS) {
+    if (data[field] !== undefined) {
+      sets.push(`${field} = $${idx++}`);
+      params.push(data[field]);
+    }
+  }
+  if (sets.length === 0) {
+    throw new AppError('No updatable fields provided', 400, 'NO_FIELDS');
+  }
+  params.push(branchId, merchantId);
+  const result = await query(
+    `UPDATE merchant_branches SET ${sets.join(', ')}, updated_at = NOW()
+     WHERE id = $${idx++} AND merchant_id = $${idx}
+     RETURNING id, name, address, city, latitude, longitude, contact_phone, is_active, created_at`,
+    params
+  );
+  if (result.rows.length === 0) {
+    throw new AppError('Branch not found', 404, 'BRANCH_NOT_FOUND');
+  }
+  return result.rows[0];
+}
+
+// ─── Items ────────────────────────────────────────────────────────────────────
+
+async function listItems(merchantId) {
+  const result = await query(
+    `SELECT id, name, description, image_url, price, currency_code, item_sku, is_active, created_at
+     FROM merchant_items WHERE merchant_id = $1 ORDER BY name`,
+    [merchantId]
+  );
+  return result.rows;
+}
+
+async function createItem(merchantId, { name, description, image_url, price, currency_code, item_sku }) {
+  const result = await query(
+    `INSERT INTO merchant_items (merchant_id, name, description, image_url, price, currency_code, item_sku)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, name, description, image_url, price, currency_code, item_sku, is_active, created_at`,
+    [merchantId, name, description || null, image_url || null, price, currency_code || 'USD', item_sku || null]
+  );
+  return result.rows[0];
+}
+
+const ITEM_FIELDS = ['name', 'description', 'image_url', 'price', 'currency_code', 'item_sku', 'is_active'];
+
+async function updateItem(merchantId, itemId, data) {
+  const sets = [];
+  const params = [];
+  let idx = 1;
+  for (const field of ITEM_FIELDS) {
+    if (data[field] !== undefined) {
+      sets.push(`${field} = $${idx++}`);
+      params.push(data[field]);
+    }
+  }
+  if (sets.length === 0) {
+    throw new AppError('No updatable fields provided', 400, 'NO_FIELDS');
+  }
+  params.push(itemId, merchantId);
+  const result = await query(
+    `UPDATE merchant_items SET ${sets.join(', ')}
+     WHERE id = $${idx++} AND merchant_id = $${idx}
+     RETURNING id, name, description, image_url, price, currency_code, item_sku, is_active, created_at`,
+    params
+  );
+  if (result.rows.length === 0) {
+    throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
+  }
+  return result.rows[0];
+}
+
+// ─── Staff ────────────────────────────────────────────────────────────────────
+
+async function assertBranchesBelongToMerchant(client, merchantId, branchIds) {
+  if (!branchIds || branchIds.length === 0) return;
+  const check = await client.query(
+    'SELECT COUNT(*) FROM merchant_branches WHERE merchant_id = $1 AND id = ANY($2)',
+    [merchantId, branchIds]
+  );
+  if (parseInt(check.rows[0].count, 10) !== branchIds.length) {
+    throw new AppError('One or more branches do not belong to this merchant', 400, 'INVALID_BRANCH');
+  }
+}
+
+async function listStaff(merchantId) {
+  const result = await query(
+    `SELECT mu.id, mu.email, mu.first_name, mu.last_name, mu.role, mu.is_active, mu.created_at,
+            COALESCE(json_agg(json_build_object('id', mb.id, 'name', mb.name))
+              FILTER (WHERE mb.id IS NOT NULL), '[]') AS branches
+     FROM merchant_users mu
+     LEFT JOIN merchant_user_branches mub ON mub.merchant_user_id = mu.id
+     LEFT JOIN merchant_branches mb ON mb.id = mub.branch_id
+     WHERE mu.merchant_id = $1
+     GROUP BY mu.id
+     ORDER BY mu.role DESC, mu.email`,
+    [merchantId]
+  );
+  return result.rows;
+}
+
+async function createStaff(merchantId, { email, password, first_name, last_name, role, branch_ids }) {
+  return withTransaction(async (client) => {
+    await assertBranchesBelongToMerchant(client, merchantId, branch_ids);
+    const hash = await bcrypt.hash(password, 10);
+    let user;
+    try {
+      const result = await client.query(
+        `INSERT INTO merchant_users (merchant_id, email, password_hash, first_name, last_name, role)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, email, first_name, last_name, role, is_active, created_at`,
+        [merchantId, email.toLowerCase(), hash, first_name || null, last_name || null, role]
+      );
+      user = result.rows[0];
+    } catch (err) {
+      if (err.code === '23505') {
+        throw new AppError('An account with this email already exists', 409, 'EMAIL_EXISTS');
+      }
+      throw err;
+    }
+    if (branch_ids && branch_ids.length > 0) {
+      for (const branchId of branch_ids) {
+        await client.query(
+          'INSERT INTO merchant_user_branches (merchant_user_id, branch_id) VALUES ($1, $2)',
+          [user.id, branchId]
+        );
+      }
+    }
+    return { ...user, branch_ids: branch_ids || [] };
+  });
+}
+
+async function updateStaff(merchantId, staffId, { first_name, last_name, role, is_active, password, branch_ids }) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      'SELECT id, role FROM merchant_users WHERE id = $1 AND merchant_id = $2',
+      [staffId, merchantId]
+    );
+    if (existing.rows.length === 0) {
+      throw new AppError('Staff account not found', 404, 'STAFF_NOT_FOUND');
+    }
+    if (existing.rows[0].role === 'owner') {
+      throw new AppError('Owner accounts cannot be modified here', 403, 'OWNER_IMMUTABLE');
+    }
+
+    const sets = [];
+    const params = [];
+    let idx = 1;
+    if (first_name !== undefined) { sets.push(`first_name = $${idx++}`); params.push(first_name); }
+    if (last_name !== undefined) { sets.push(`last_name = $${idx++}`); params.push(last_name); }
+    if (role !== undefined) { sets.push(`role = $${idx++}`); params.push(role); }
+    if (is_active !== undefined) { sets.push(`is_active = $${idx++}`); params.push(is_active); }
+    if (password !== undefined) { sets.push(`password_hash = $${idx++}`); params.push(await bcrypt.hash(password, 10)); }
+    if (sets.length > 0) {
+      params.push(staffId);
+      await client.query(
+        `UPDATE merchant_users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
+        params
+      );
+    }
+
+    if (branch_ids !== undefined) {
+      await assertBranchesBelongToMerchant(client, merchantId, branch_ids);
+      await client.query('DELETE FROM merchant_user_branches WHERE merchant_user_id = $1', [staffId]);
+      for (const branchId of branch_ids || []) {
+        await client.query(
+          'INSERT INTO merchant_user_branches (merchant_user_id, branch_id) VALUES ($1, $2)',
+          [staffId, branchId]
+        );
+      }
+    }
+
+    const result = await client.query(
+      `SELECT mu.id, mu.email, mu.first_name, mu.last_name, mu.role, mu.is_active,
+              COALESCE(json_agg(mub.branch_id) FILTER (WHERE mub.branch_id IS NOT NULL), '[]') AS branch_ids
+       FROM merchant_users mu
+       LEFT JOIN merchant_user_branches mub ON mub.merchant_user_id = mu.id
+       WHERE mu.id = $1
+       GROUP BY mu.id`,
+      [staffId]
+    );
+    return result.rows[0];
+  });
+}
+
+// ─── Profile ──────────────────────────────────────────────────────────────────
+
+async function getProfile(merchantId) {
+  const result = await query(
+    `SELECT id, name, slug, description, website_url, logo_url, banner_image_url,
+            contact_email, contact_phone, is_active, is_verified, rating, review_count
+     FROM merchants WHERE id = $1`,
+    [merchantId]
+  );
+  return result.rows[0];
+}
+
+const PROFILE_FIELDS = [
+  'description', 'website_url', 'logo_url', 'banner_image_url',
+  'contact_email', 'contact_phone',
+];
+
+async function updateProfile(merchantId, data) {
+  const sets = [];
+  const params = [];
+  let idx = 1;
+  for (const field of PROFILE_FIELDS) {
+    if (data[field] !== undefined) {
+      sets.push(`${field} = $${idx++}`);
+      params.push(data[field]);
+    }
+  }
+  if (sets.length === 0) {
+    throw new AppError('No updatable fields provided', 400, 'NO_FIELDS');
+  }
+  params.push(merchantId);
+  const result = await query(
+    `UPDATE merchants SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idx}
+     RETURNING id, name, slug, description, website_url, logo_url, banner_image_url,
+               contact_email, contact_phone`,
+    params
+  );
+  return result.rows[0];
+}
+
 module.exports = {
   merchantLogin,
   getMerchantDashboard,
+  listBranches,
+  createBranch,
+  updateBranch,
+  listItems,
+  createItem,
+  updateItem,
+  listStaff,
+  createStaff,
+  updateStaff,
+  getProfile,
+  updateProfile,
 };

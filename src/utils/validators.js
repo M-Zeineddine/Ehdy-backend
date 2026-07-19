@@ -222,6 +222,40 @@ const confirmRedemptionValidation = [
     .optional()
     .isFloat({ min: 0.01 })
     .withMessage('Amount must be positive'),
+  body('branch_id').optional().isUUID().withMessage('Invalid branch_id'),
+];
+
+// Merchant portal management validators
+const branchCreateValidation = [
+  body('name').trim().notEmpty().withMessage('Branch name is required'),
+  body('latitude').optional().isFloat({ min: -90, max: 90 }).withMessage('Invalid latitude'),
+  body('longitude').optional().isFloat({ min: -180, max: 180 }).withMessage('Invalid longitude'),
+];
+
+const itemCreateValidation = [
+  body('name').trim().notEmpty().withMessage('Item name is required'),
+  body('price').isFloat({ min: 0.01 }).withMessage('Price must be positive'),
+  body('currency_code').optional().isLength({ min: 3, max: 3 }).withMessage('Invalid currency code'),
+];
+
+const itemUpdateValidation = [
+  body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be positive'),
+  body('currency_code').optional().isLength({ min: 3, max: 3 }).withMessage('Invalid currency code'),
+];
+
+const staffCreateValidation = [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  body('role').isIn(['manager', 'staff']).withMessage('Role must be manager or staff'),
+  body('branch_ids').optional().isArray().withMessage('branch_ids must be an array'),
+  body('branch_ids.*').isUUID().withMessage('Invalid branch id'),
+];
+
+const staffUpdateValidation = [
+  body('role').optional().isIn(['manager', 'staff']).withMessage('Role must be manager or staff'),
+  body('password').optional().isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  body('branch_ids').optional().isArray().withMessage('branch_ids must be an array'),
+  body('branch_ids.*').isUUID().withMessage('Invalid branch id'),
 ];
 
 // Pagination validators
@@ -259,6 +293,11 @@ module.exports = {
   merchantLoginValidation,
   validateRedemptionValidation,
   confirmRedemptionValidation,
+  branchCreateValidation,
+  itemCreateValidation,
+  itemUpdateValidation,
+  staffCreateValidation,
+  staffUpdateValidation,
   paginationValidation,
   uuidParamValidation,
 };
