@@ -116,7 +116,7 @@ function renderItemCards(items) {
   `).join('');
 }
 
-function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [] }) {
+function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [], redeemableAt = null }) {
   const theme = getTheme(gift.theme);
   const [c1, c2] = theme.gradient;
   const senderName = gift.sender_name || 'Someone';
@@ -602,6 +602,17 @@ function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientNa
       </div>` : ''}
     </div>
 
+    ${branches.length > 0 || redeemableAt ? `
+    <!-- Branch availability -->
+    <div style="display:flex;align-items:center;gap:8px;justify-content:center;background:${redeemableAt ? '#FFF7ED' : '#F0FDF4'};border:1px solid ${redeemableAt ? '#FED7AA' : '#BBF7D0'};border-radius:999px;padding:8px 16px;align-self:center;">
+      <span>📍</span>
+      <span style="font-size:13px;font-weight:600;color:${redeemableAt ? '#9A3412' : '#166534'};">
+        ${redeemableAt
+          ? `Redeemable at ${escapeHtml(redeemableAt.join(', '))} branch only`
+          : `Redeemable at any ${escapeHtml(merchantName)} branch`}
+      </span>
+    </div>` : ''}
+
     <!-- How to redeem -->
     <div class="redeem-section">
       <p class="redeem-title">How to redeem</p>
@@ -612,7 +623,9 @@ function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientNa
             <div class="step-line"></div>
           </div>
           <div class="step-body">
-            <h4>Visit any ${merchantName ? escapeHtml(merchantName) + ' branch' : 'participating branch'}</h4>
+            <h4>${redeemableAt
+              ? `Visit the ${escapeHtml(redeemableAt.join(', '))} branch`
+              : `Visit any ${merchantName ? escapeHtml(merchantName) + ' branch' : 'participating branch'}`}</h4>
             <p>Show this page or open Ehdy at the counter.</p>
           </div>
         </div>
@@ -822,13 +835,31 @@ router.get('/:shareCode', async (req, res) => {
     let branches = [];
     if (merchantId) {
       const branchResult = await query(
-        `SELECT name, address, city, latitude, longitude
+        `SELECT id, name, address, city, latitude, longitude
          FROM merchant_branches
          WHERE merchant_id = $1 AND is_active = true
          ORDER BY name`,
         [merchantId]
       );
       branches = branchResult.rows;
+    }
+
+    // Branch-scoped items: only show (and advertise) the branches the item
+    // can actually be redeemed at. null = any branch.
+    let redeemableAt = null;
+    if (row.merchant_item_id && branches.length > 0) {
+      const scopeResult = await query(
+        'SELECT branch_id FROM merchant_item_branches WHERE merchant_item_id = $1',
+        [row.merchant_item_id]
+      );
+      if (scopeResult.rows.length > 0) {
+        const allowed = new Set(scopeResult.rows.map((r) => r.branch_id));
+        const scopedBranches = branches.filter((b) => allowed.has(b.id));
+        if (scopedBranches.length > 0) {
+          branches = scopedBranches;
+          redeemableAt = scopedBranches.map((b) => b.name);
+        }
+      }
     }
 
     res.send(renderGiftPage({
@@ -838,6 +869,7 @@ router.get('/:shareCode', async (req, res) => {
       redemptionQr: row.redemption_qr_code || null,
       recipientName: row.recipient_name || null,
       branches,
+      redeemableAt,
     }));
   } catch (err) {
     logger.error('Gift page error', { shareCode, error: err.message });
