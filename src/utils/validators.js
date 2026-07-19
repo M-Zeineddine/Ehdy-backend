@@ -236,11 +236,15 @@ const itemCreateValidation = [
   body('name').trim().notEmpty().withMessage('Item name is required'),
   body('price').isFloat({ min: 0.01 }).withMessage('Price must be positive'),
   body('currency_code').optional().isLength({ min: 3, max: 3 }).withMessage('Invalid currency code'),
+  body('branch_ids').optional().isArray().withMessage('branch_ids must be an array'),
+  body('branch_ids.*').isUUID().withMessage('Invalid branch id'),
 ];
 
 const itemUpdateValidation = [
   body('price').optional().isFloat({ min: 0.01 }).withMessage('Price must be positive'),
   body('currency_code').optional().isLength({ min: 3, max: 3 }).withMessage('Invalid currency code'),
+  body('branch_ids').optional().isArray().withMessage('branch_ids must be an array'),
+  body('branch_ids.*').isUUID().withMessage('Invalid branch id'),
 ];
 
 const staffCreateValidation = [

@@ -94,12 +94,17 @@ async function getMerchantById(merchantId) {
 
   const merchant = result.rows[0];
 
-  // Get merchant items
+  // Get merchant items; available_branches [] = redeemable at any branch
   const items = await query(
-    `SELECT id, name, description, image_url, price, currency_code, item_sku
-     FROM merchant_items
-     WHERE merchant_id = $1 AND is_active = TRUE
-     ORDER BY name ASC`,
+    `SELECT mi.id, mi.name, mi.description, mi.image_url, mi.price, mi.currency_code, mi.item_sku,
+            COALESCE(json_agg(json_build_object('id', mb.id, 'name', mb.name))
+              FILTER (WHERE mb.id IS NOT NULL), '[]') AS available_branches
+     FROM merchant_items mi
+     LEFT JOIN merchant_item_branches mib ON mib.merchant_item_id = mi.id
+     LEFT JOIN merchant_branches mb ON mb.id = mib.branch_id AND mb.is_active = TRUE
+     WHERE mi.merchant_id = $1 AND mi.is_active = TRUE
+     GROUP BY mi.id
+     ORDER BY mi.name ASC`,
     [merchantId]
   );
 

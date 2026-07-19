@@ -63,6 +63,22 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
     throw new AppError('This code has expired', 400, 'CODE_EXPIRED');
   }
 
+  // Branch availability for gift items: null = redeemable at any branch
+  let redeemableBranches = null;
+  if (instance.merchant_item_id) {
+    const avail = await query(
+      `SELECT mb.id, mb.name
+       FROM merchant_item_branches mib
+       JOIN merchant_branches mb ON mb.id = mib.branch_id
+       WHERE mib.merchant_item_id = $1
+       ORDER BY mb.name`,
+      [instance.merchant_item_id]
+    );
+    if (avail.rows.length > 0) {
+      redeemableBranches = avail.rows;
+    }
+  }
+
   logger.info('Redemption code validated', { redemptionCode, merchantId });
 
   return {
@@ -77,6 +93,7 @@ async function validateRedemptionCode(redemptionCode, merchantId) {
         ? `${instance.owner_first_name} ${instance.owner_last_name}`.trim()
         : null,
       current_balance: instance.current_balance,
+      redeemable_branches: redeemableBranches,
     },
   };
 }
@@ -164,6 +181,24 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
 
     if (instance.expiration_date && new Date(instance.expiration_date) < new Date()) {
       throw new AppError('This code has expired', 400, 'CODE_EXPIRED');
+    }
+
+    // Enforce branch availability for branch-scoped items
+    if (instance.merchant_item_id) {
+      const avail = await client.query(
+        'SELECT branch_id FROM merchant_item_branches WHERE merchant_item_id = $1',
+        [instance.merchant_item_id]
+      );
+      if (avail.rows.length > 0) {
+        const allowed = avail.rows.map((r) => r.branch_id);
+        if (!effectiveBranchId || !allowed.includes(effectiveBranchId)) {
+          throw new AppError(
+            'This item is not redeemable at this branch',
+            403,
+            'ITEM_NOT_AVAILABLE_AT_BRANCH'
+          );
+        }
+      }
     }
 
     let newBalance = instance.current_balance;

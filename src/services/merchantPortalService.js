@@ -267,49 +267,101 @@ async function updateBranch(merchantId, branchId, data) {
 
 async function listItems(merchantId) {
   const result = await query(
-    `SELECT id, name, description, image_url, price, currency_code, item_sku, is_active, created_at
-     FROM merchant_items WHERE merchant_id = $1 ORDER BY name`,
+    `SELECT mi.id, mi.name, mi.description, mi.image_url, mi.price, mi.currency_code,
+            mi.item_sku, mi.is_active, mi.created_at,
+            COALESCE(json_agg(json_build_object('id', mb.id, 'name', mb.name))
+              FILTER (WHERE mb.id IS NOT NULL), '[]') AS available_branches
+     FROM merchant_items mi
+     LEFT JOIN merchant_item_branches mib ON mib.merchant_item_id = mi.id
+     LEFT JOIN merchant_branches mb ON mb.id = mib.branch_id
+     WHERE mi.merchant_id = $1
+     GROUP BY mi.id
+     ORDER BY mi.name`,
     [merchantId]
   );
   return result.rows;
 }
 
-async function createItem(merchantId, { name, description, image_url, price, currency_code, item_sku }) {
-  const result = await query(
-    `INSERT INTO merchant_items (merchant_id, name, description, image_url, price, currency_code, item_sku)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, name, description, image_url, price, currency_code, item_sku, is_active, created_at`,
-    [merchantId, name, description || null, image_url || null, price, currency_code || 'USD', item_sku || null]
-  );
-  return result.rows[0];
+async function createItem(merchantId, { name, description, image_url, price, currency_code, item_sku, branch_ids }) {
+  return withTransaction(async (client) => {
+    await assertBranchesBelongToMerchant(client, merchantId, branch_ids);
+    const result = await client.query(
+      `INSERT INTO merchant_items (merchant_id, name, description, image_url, price, currency_code, item_sku)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, name, description, image_url, price, currency_code, item_sku, is_active, created_at`,
+      [merchantId, name, description || null, image_url || null, price, currency_code || 'USD', item_sku || null]
+    );
+    const item = result.rows[0];
+    for (const branchId of branch_ids || []) {
+      await client.query(
+        'INSERT INTO merchant_item_branches (merchant_item_id, branch_id) VALUES ($1, $2)',
+        [item.id, branchId]
+      );
+    }
+    return { ...item, branch_ids: branch_ids || [] };
+  });
 }
 
 const ITEM_FIELDS = ['name', 'description', 'image_url', 'price', 'currency_code', 'item_sku', 'is_active'];
 
 async function updateItem(merchantId, itemId, data) {
-  const sets = [];
-  const params = [];
-  let idx = 1;
-  for (const field of ITEM_FIELDS) {
-    if (data[field] !== undefined) {
-      sets.push(`${field} = $${idx++}`);
-      params.push(data[field]);
+  return withTransaction(async (client) => {
+    const sets = [];
+    const params = [];
+    let idx = 1;
+    for (const field of ITEM_FIELDS) {
+      if (data[field] !== undefined) {
+        sets.push(`${field} = $${idx++}`);
+        params.push(data[field]);
+      }
     }
-  }
-  if (sets.length === 0) {
-    throw new AppError('No updatable fields provided', 400, 'NO_FIELDS');
-  }
-  params.push(itemId, merchantId);
-  const result = await query(
-    `UPDATE merchant_items SET ${sets.join(', ')}
-     WHERE id = $${idx++} AND merchant_id = $${idx}
-     RETURNING id, name, description, image_url, price, currency_code, item_sku, is_active, created_at`,
-    params
-  );
-  if (result.rows.length === 0) {
-    throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
-  }
-  return result.rows[0];
+    if (sets.length === 0 && data.branch_ids === undefined) {
+      throw new AppError('No updatable fields provided', 400, 'NO_FIELDS');
+    }
+
+    let item;
+    if (sets.length > 0) {
+      params.push(itemId, merchantId);
+      const result = await client.query(
+        `UPDATE merchant_items SET ${sets.join(', ')}
+         WHERE id = $${idx++} AND merchant_id = $${idx}
+         RETURNING id, name, description, image_url, price, currency_code, item_sku, is_active, created_at`,
+        params
+      );
+      if (result.rows.length === 0) {
+        throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
+      }
+      item = result.rows[0];
+    } else {
+      const result = await client.query(
+        `SELECT id, name, description, image_url, price, currency_code, item_sku, is_active, created_at
+         FROM merchant_items WHERE id = $1 AND merchant_id = $2`,
+        [itemId, merchantId]
+      );
+      if (result.rows.length === 0) {
+        throw new AppError('Item not found', 404, 'ITEM_NOT_FOUND');
+      }
+      item = result.rows[0];
+    }
+
+    // branch_ids replaces the availability set; [] restores "all branches"
+    if (data.branch_ids !== undefined) {
+      await assertBranchesBelongToMerchant(client, merchantId, data.branch_ids);
+      await client.query('DELETE FROM merchant_item_branches WHERE merchant_item_id = $1', [itemId]);
+      for (const branchId of data.branch_ids || []) {
+        await client.query(
+          'INSERT INTO merchant_item_branches (merchant_item_id, branch_id) VALUES ($1, $2)',
+          [itemId, branchId]
+        );
+      }
+    }
+
+    const branches = await client.query(
+      'SELECT branch_id FROM merchant_item_branches WHERE merchant_item_id = $1',
+      [itemId]
+    );
+    return { ...item, branch_ids: branches.rows.map((r) => r.branch_id) };
+  });
 }
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
