@@ -115,7 +115,7 @@ const authenticateMerchant = async (req, res, next) => {
     // Verify merchant user still exists and is active
     const result = await query(
       `SELECT mu.id, mu.merchant_id, mu.email, mu.first_name, mu.last_name,
-              mu.role, mu.branch_id,
+              mu.role,
               m.name as merchant_name, m.is_active as merchant_is_active
        FROM merchant_users mu
        JOIN merchants m ON m.id = mu.merchant_id
@@ -142,8 +142,6 @@ const authenticateMerchant = async (req, res, next) => {
       );
       if (branchRows.rows.length > 0) {
         branchIds = branchRows.rows.map((r) => r.branch_id);
-      } else if (merchantUser.branch_id) {
-        branchIds = [merchantUser.branch_id];
       }
     }
 
@@ -151,8 +149,8 @@ const authenticateMerchant = async (req, res, next) => {
     req.merchantUserId = decoded.merchantUserId;
     req.merchantId = merchantUser.merchant_id;
     req.branchIds = branchIds;
-    req.branchId = merchantUser.branch_id
-      || (branchIds && branchIds.length === 1 ? branchIds[0] : null);
+    // Single-branch users get their branch stamped on redemptions
+    req.branchId = branchIds && branchIds.length === 1 ? branchIds[0] : null;
     return next();
   } catch (err) {
     logger.warn('Merchant authentication failed', { error: err.message });
