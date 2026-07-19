@@ -2,7 +2,7 @@
 
 const multer = require('multer');
 const crypto = require('crypto');
-const { getSupabase, MERCHANT_ASSETS_BUCKET } = require('../config/supabase');
+const { getStorage, MERCHANT_ASSETS_BUCKET } = require('../config/supabase');
 const merchantPortalService = require('../services/merchantPortalService');
 const redemptionService = require('../services/redemptionService');
 const { successResponse, paginatedResponse } = require('../utils/formatters');
@@ -221,14 +221,14 @@ const uploadImage = async (req, res, next) => {
       return next(new AppError('Image file is required (field name: image)', 400, 'IMAGE_REQUIRED'));
     }
     const key = `merchants/${req.merchantId}/${crypto.randomUUID()}.${IMAGE_EXT[req.file.mimetype]}`;
-    const supabase = getSupabase();
-    const { error } = await supabase.storage
+    const storage = getStorage();
+    const { error } = await storage
       .from(MERCHANT_ASSETS_BUCKET)
       .upload(key, req.file.buffer, { contentType: req.file.mimetype });
     if (error) {
       return next(new AppError(`Image upload failed: ${error.message}`, 502, 'UPLOAD_FAILED'));
     }
-    const { data } = supabase.storage.from(MERCHANT_ASSETS_BUCKET).getPublicUrl(key);
+    const { data } = storage.from(MERCHANT_ASSETS_BUCKET).getPublicUrl(key);
     return successResponse(res, { id: key, url: data.publicUrl }, 'Image uploaded.');
   } catch (err) {
     return next(err);

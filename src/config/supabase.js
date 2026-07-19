@@ -1,24 +1,28 @@
 'use strict';
 
 require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+const { StorageClient } = require('@supabase/storage-js');
 
-// Server-side Supabase client for Storage uploads. Uses the service-role key
-// (bypasses RLS) — must never be exposed to any client.
+// Storage-only Supabase client (service role — bypasses RLS, server-only).
+// Deliberately NOT @supabase/supabase-js: its createClient() constructs a
+// realtime WebSocket client we never use, which crashes on Node < 22.
 let client = null;
 
-function getSupabase() {
+function getStorage() {
   if (!client) {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) {
       throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set for image uploads');
     }
-    client = createClient(url, key, { auth: { persistSession: false } });
+    client = new StorageClient(`${url}/storage/v1`, {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+    });
   }
   return client;
 }
 
 const MERCHANT_ASSETS_BUCKET = 'merchant-assets';
 
-module.exports = { getSupabase, MERCHANT_ASSETS_BUCKET };
+module.exports = { getStorage, MERCHANT_ASSETS_BUCKET };
