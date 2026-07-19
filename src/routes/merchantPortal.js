@@ -50,6 +50,20 @@ router.use(authenticateMerchant);
 
 /**
  * @swagger
+ * /merchant/me:
+ *   get:
+ *     tags: [Merchant Portal]
+ *     summary: Get the authenticated merchant user (same shape as login)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current merchant user with role and branch scope
+ */
+router.get('/me', merchantPortalController.getMe);
+
+/**
+ * @swagger
  * /merchant/dashboard:
  *   get:
  *     tags: [Merchant Portal]

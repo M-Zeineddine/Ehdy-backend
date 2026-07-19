@@ -15,6 +15,26 @@ const login = async (req, res, next) => {
   }
 };
 
+// Same shape as login's merchant_user — clients re-fetch this at startup so a
+// cached account never goes stale when roles/branch scope change server-side.
+const getMe = async (req, res, next) => {
+  try {
+    const merchant_user = {
+      id: req.merchant.id,
+      email: req.merchant.email,
+      first_name: req.merchant.first_name,
+      last_name: req.merchant.last_name,
+      merchant_id: req.merchant.merchant_id,
+      merchant_name: req.merchant.merchant_name,
+      role: req.merchant.role,
+      branch_ids: req.branchIds,
+    };
+    return successResponse(res, { merchant_user });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const getDashboard = async (req, res, next) => {
   try {
     const dashboard = await merchantPortalService.getMerchantDashboard(req.merchantId, req.branchIds);
@@ -177,7 +197,7 @@ const updateProfile = async (req, res, next) => {
 };
 
 module.exports = {
-  login, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp,
+  login, getMe, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp,
   confirmRedemption, getRedemptions,
   listBranches, createBranch, updateBranch,
   listItems, createItem, updateItem,
