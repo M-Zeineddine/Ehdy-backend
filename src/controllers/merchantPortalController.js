@@ -1,5 +1,8 @@
 'use strict';
 
+const multer = require('multer');
+const crypto = require('crypto');
+const { getSupabase, MERCHANT_ASSETS_BUCKET } = require('../config/supabase');
 const merchantPortalService = require('../services/merchantPortalService');
 const redemptionService = require('../services/redemptionService');
 const { successResponse, paginatedResponse } = require('../utils/formatters');
@@ -196,6 +199,42 @@ const updateProfile = async (req, res, next) => {
   } catch (err) { return next(err); }
 };
 
+// ─── Image upload (Supabase Storage, served from the public CDN URL) ─────────
+
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+const uploadImageMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_IMAGE_TYPES.includes(file.mimetype)) {
+      return cb(new AppError('Only JPEG, PNG or WebP images are allowed', 400, 'INVALID_IMAGE_TYPE'));
+    }
+    return cb(null, true);
+  },
+}).single('image');
+
+const uploadImage = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return next(new AppError('Image file is required (field name: image)', 400, 'IMAGE_REQUIRED'));
+    }
+    const key = `merchants/${req.merchantId}/${crypto.randomUUID()}.${IMAGE_EXT[req.file.mimetype]}`;
+    const supabase = getSupabase();
+    const { error } = await supabase.storage
+      .from(MERCHANT_ASSETS_BUCKET)
+      .upload(key, req.file.buffer, { contentType: req.file.mimetype });
+    if (error) {
+      return next(new AppError(`Image upload failed: ${error.message}`, 502, 'UPLOAD_FAILED'));
+    }
+    const { data } = supabase.storage.from(MERCHANT_ASSETS_BUCKET).getPublicUrl(key);
+    return successResponse(res, { id: key, url: data.publicUrl }, 'Image uploaded.');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   login, getMe, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp,
   confirmRedemption, getRedemptions,
@@ -203,4 +242,5 @@ module.exports = {
   listItems, createItem, updateItem,
   listStaff, createStaff, updateStaff,
   getProfile, updateProfile,
+  uploadImageMiddleware, uploadImage,
 };

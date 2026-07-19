@@ -173,6 +173,9 @@ router.get('/staff', requireOwnerRole, merchantPortalController.listStaff);
 router.post('/staff', requireOwnerRole, staffCreateValidation, validate, merchantPortalController.createStaff);
 router.patch('/staff/:id', requireOwnerRole, uuidParamValidation(), staffUpdateValidation, validate, merchantPortalController.updateStaff);
 
+// ─── Images (owner only) ──────────────────────────────────────────────────────
+router.post('/images', requireOwnerRole, merchantPortalController.uploadImageMiddleware, merchantPortalController.uploadImage);
+
 // ─── Profile ──────────────────────────────────────────────────────────────────
 router.get('/profile', requireMerchantRole('owner', 'manager'), merchantPortalController.getProfile);
 router.patch('/profile', requireOwnerRole, merchantPortalController.updateProfile);
