@@ -4,13 +4,14 @@ const router = require('express').Router();
 const { query } = require('../utils/database');
 const logger = require('../utils/logger');
 const { renderGiftPage, renderNotFound } = require('../views/giftPage');
+const { formatMoney } = require('../views/giftPage/partials');
 
 async function fetchGift(shareCode) {
   const result = await query(
     `SELECT
        gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme, gs.payment_status,
        gs.merchant_item_id, gs.custom_credit_merchant_id,
-       gs.custom_credit_amount, gs.custom_credit_currency, gs.sent_at,
+       gs.custom_credit_amount, gs.custom_credit_currency,
        mi.name          AS item_name,
        mi.price         AS item_price,
        mi.currency_code AS item_currency,
@@ -23,7 +24,8 @@ async function fetchGift(shareCode) {
        cc_m.logo_url    AS credit_merchant_logo,
        gi.id            AS gift_instance_id,
        gi.redemption_code, gi.redemption_qr_code,
-       gi.initial_balance, gi.current_balance, gi.currency_code AS instance_currency
+       gi.initial_balance, gi.current_balance, gi.currency_code AS instance_currency,
+       gi.is_redeemed, gi.redeemed_at
      FROM gifts_sent gs
      LEFT JOIN merchant_items mi  ON mi.id    = gs.merchant_item_id
      LEFT JOIN merchants mi_m     ON mi_m.id  = mi.merchant_id
@@ -66,6 +68,25 @@ async function fetchRedemptionHistory(giftInstanceId) {
 }
 
 /**
+ * Most recent redemption event for a gift instance — used to enrich a
+ * one-shot item claim with where it happened. Best-effort: older redemptions
+ * may predate event logging, so gi.is_redeemed/redeemed_at stay the source
+ * of truth for whether/when, and this only adds the branch if we have it.
+ */
+async function fetchLatestRedemptionEvent(giftInstanceId) {
+  const result = await query(
+    `SELECT re.redeemed_at, b.name AS branch_name
+     FROM redemption_events re
+     LEFT JOIN merchant_branches b ON b.id = re.branch_id
+     WHERE re.gift_instance_id = $1
+     ORDER BY re.redeemed_at DESC
+     LIMIT 1`,
+    [giftInstanceId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
  * Branch-scoped items: only show (and advertise) the branches the item
  * can actually be redeemed at. Returns { branches, redeemableAt };
  * redeemableAt is null when the item is redeemable at any branch.
@@ -91,11 +112,11 @@ function buildGiftItem(row) {
 
   const merchantName = isCredit ? row.credit_merchant : row.item_merchant;
   const itemName = isCredit
-    ? `${row.custom_credit_currency || 'USD'} ${row.custom_credit_amount} Store Credit`
+    ? `${formatMoney(row.custom_credit_amount, row.custom_credit_currency || 'USD')} Store Credit`
     : (row.item_name || 'Gift');
   const details = isCredit
     ? null
-    : (row.item_currency && row.item_price ? `${row.item_currency} ${row.item_price}` : null);
+    : (row.item_currency && row.item_price ? formatMoney(row.item_price, row.item_currency) : null);
 
   // Item image, falling back to the merchant's profile picture
   const merchantLogo = isCredit ? row.credit_merchant_logo : row.item_merchant_logo;
@@ -124,8 +145,13 @@ router.get('/:shareCode', async (req, res) => {
       initial: row.initial_balance,
       current: row.current_balance,
       merchantName: row.credit_merchant,
-      sentAt: row.sent_at,
       history: await fetchRedemptionHistory(row.gift_instance_id),
+    } : null;
+
+    const itemStatus = !isCredit && row.gift_instance_id && row.is_redeemed ? {
+      redeemedAt: row.redeemed_at,
+      merchantName: row.item_merchant,
+      event: await fetchLatestRedemptionEvent(row.gift_instance_id),
     } : null;
 
     res.send(renderGiftPage({
@@ -138,6 +164,7 @@ router.get('/:shareCode', async (req, res) => {
       branches,
       redeemableAt,
       balance,
+      itemStatus,
     }));
   } catch (err) {
     logger.error('Gift page error', { shareCode, error: err.message });

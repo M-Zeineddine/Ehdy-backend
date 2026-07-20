@@ -122,17 +122,23 @@ function formatHistoryDate(iso) {
   });
 }
 
+/** $ for USD (the common case on this page); unrecognized currencies keep their code. */
+function formatMoney(amount, currencyCode) {
+  const num = typeof amount === 'number' ? amount : parseFloat(amount) || 0;
+  return currencyCode === 'USD' ? `$${num.toFixed(2)}` : `${currencyCode} ${num.toFixed(2)}`;
+}
+
 /**
  * Balance + redemption history for store-credit gifts — the only type with
- * partial redemption. A single ledger, newest first: the original gift
- * credit (green, +) and each redemption (red, -), each one title+date row
- * with the amount on the right.
+ * partial redemption. Newest first: one title+date row per redemption, with
+ * the amount (as a negative) on the right.
  */
 function renderBalanceSection({ balance, styleIndex }) {
   if (!balance) return '';
-  const { currency, initial, current, history, merchantName, sentAt } = balance;
+  const { currency, initial, current, history, merchantName } = balance;
   const initialNum = parseFloat(initial) || 0;
   const currentNum = parseFloat(current) || 0;
+  const spentNum = Math.max(0, initialNum - currentNum);
   const pctLeft = initialNum > 0 ? Math.max(0, Math.min(100, (currentNum / initialNum) * 100)) : 100;
 
   const entries = history.map(h => ({
@@ -141,23 +147,16 @@ function renderBalanceSection({ balance, styleIndex }) {
     amount: -parseFloat(h.amount),
     currencyCode: h.currency_code || currency,
   }));
-  if (sentAt) {
-    entries.push({ title: 'Gift received 🎁', date: sentAt, amount: initialNum, currencyCode: currency });
-  }
   entries.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  const rows = entries.map(e => {
-    const positive = e.amount >= 0;
-    const sign = positive ? '+' : '-';
-    return `
+  const rows = entries.map(e => `
         <div class="history-row">
           <div class="history-info">
             <p class="history-entry-title">${escapeHtml(e.title)}</p>
             <p class="history-entry-date">${escapeHtml(formatHistoryDate(e.date))}</p>
           </div>
-          <span class="history-amount ${positive ? 'history-amount-positive' : 'history-amount-negative'}">${sign}${escapeHtml(e.currencyCode)} ${Math.abs(e.amount).toFixed(2)}</span>
-        </div>`;
-  }).join('');
+          <span class="history-amount history-amount-spent">-${escapeHtml(formatMoney(Math.abs(e.amount), e.currencyCode))}</span>
+        </div>`).join('');
 
   return `
     <!-- Balance + redemption history -->
@@ -165,14 +164,20 @@ function renderBalanceSection({ balance, styleIndex }) {
       <div class="balance-summary">
         <div class="balance-stat">
           <p class="balance-label">Remaining</p>
-          <p class="balance-value balance-value-main">${escapeHtml(currency)} ${currentNum.toFixed(2)}</p>
-        </div>
-        <div class="balance-stat balance-stat-right">
-          <p class="balance-label">Original</p>
-          <p class="balance-value">${escapeHtml(currency)} ${initialNum.toFixed(2)}</p>
+          <p class="balance-value balance-value-main">${escapeHtml(formatMoney(currentNum, currency))}</p>
         </div>
       </div>
       <div class="balance-bar-track"><div class="balance-bar-fill" style="width:${pctLeft.toFixed(1)}%"></div></div>
+      <div class="balance-substats">
+        <div class="balance-stat-mini">
+          <span class="balance-mini-label">Original</span>
+          <span class="balance-mini-value">${escapeHtml(formatMoney(initialNum, currency))}</span>
+        </div>
+        <div class="balance-stat-mini balance-stat-mini-right">
+          <span class="balance-mini-label">Total Spent</span>
+          <span class="balance-mini-value">${escapeHtml(formatMoney(spentNum, currency))}</span>
+        </div>
+      </div>
 
       ${entries.length ? `
       <div class="history-list">
@@ -193,6 +198,29 @@ function renderBranchPill({ branchCount, redeemableAt, merchantName, styleIndex 
           ? `Redeemable at ${escapeHtml(redeemableAt.join(', '))} branch only`
           : `Redeemable at any ${escapeHtml(merchantName)} branch`}
       </span>
+    </div>`;
+}
+
+/**
+ * One-line redeemed confirmation for gift-item (non-credit) gifts — these
+ * are claimed once, in full, so there's no ledger, just a single fact.
+ */
+function renderItemStatusSection({ itemStatus, styleIndex }) {
+  if (!itemStatus) return '';
+  const { redeemedAt, merchantName, event } = itemStatus;
+  const date = new Date(event?.redeemed_at || redeemedAt).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+  const where = [merchantName, event?.branch_name].filter(Boolean).join(' — ');
+
+  return `
+    <!-- Redeemed status -->
+    <div class="redeemed-card" style="--i:${styleIndex}">
+      <div class="redeemed-icon-circle">✓</div>
+      <div>
+        <p class="redeemed-title">Redeemed</p>
+        <p class="redeemed-detail">${escapeHtml(date)}${where ? ` at ${escapeHtml(where)}` : ''}</p>
+      </div>
     </div>`;
 }
 
@@ -245,11 +273,13 @@ function renderCta({ styleIndex }) {
 }
 
 module.exports = {
+  formatMoney,
   renderParticles,
   renderHeader,
   renderGiftCard,
   renderItemsSection,
   renderBalanceSection,
+  renderItemStatusSection,
   renderBranchPill,
   renderRedeemSteps,
   renderCta,

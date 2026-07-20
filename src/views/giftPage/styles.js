@@ -381,12 +381,8 @@ function pageStyles([c1, c2]) {
     /* ── Balance + redemption history ── */
     .balance-section { padding: 20px 16px; }
     .balance-summary {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
       margin-bottom: 10px;
     }
-    .balance-stat-right { text-align: right; }
     .balance-label {
       font-size: 10px;
       font-weight: 700;
@@ -395,13 +391,9 @@ function pageStyles([c1, c2]) {
       color: #A89990;
       margin-bottom: 3px;
     }
-    .balance-value {
-      font-size: 15px;
-      font-weight: 700;
-      color: #7A6A62;
-    }
     .balance-value-main {
       font-size: 24px;
+      font-weight: 700;
       color: #F07856;
     }
     .balance-bar-track {
@@ -409,12 +401,36 @@ function pageStyles([c1, c2]) {
       border-radius: 999px;
       background: #F0EBE5;
       overflow: hidden;
-      margin-bottom: 18px;
+      margin-bottom: 10px;
     }
     .balance-bar-fill {
       height: 100%;
       border-radius: 999px;
       background: #F07856;
+    }
+    /* Original / Total Spent — de-emphasized; the user already knows these numbers */
+    .balance-substats {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 26px;
+    }
+    .balance-stat-mini {
+      display: flex;
+      flex-direction: column;
+    }
+    .balance-stat-mini-right { align-items: flex-end; }
+    .balance-mini-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #A89990;
+      margin-bottom: 2px;
+    }
+    .balance-mini-value {
+      font-size: 12px;
+      font-weight: 600;
+      color: #7A6A62;
     }
     .history-title {
       font-size: 12px;
@@ -455,8 +471,41 @@ function pageStyles([c1, c2]) {
       font-weight: 700;
       flex-shrink: 0;
     }
-    .history-amount-positive { color: #16A34A; }
-    .history-amount-negative { color: #E53935; }
+    .history-amount-spent { color: #7A6A62; font-weight: 600; }
+
+    /* ── Redeemed status (gift items — one-shot claim, not a ledger) ── */
+    .redeemed-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #F0FDF4;
+      border: 1px solid #BBF7D0;
+      border-radius: 16px;
+      padding: 14px 16px;
+    }
+    .redeemed-icon-circle {
+      width: 34px;
+      height: 34px;
+      border-radius: 17px;
+      background: #166534;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+    .redeemed-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #166534;
+    }
+    .redeemed-detail {
+      font-size: 12px;
+      color: #166534;
+      opacity: 0.85;
+      margin-top: 1px;
+    }
 
     /* ── How to redeem ── */
     .redeem-section { padding: 0; }

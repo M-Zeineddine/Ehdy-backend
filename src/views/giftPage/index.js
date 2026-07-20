@@ -9,6 +9,7 @@ const {
   renderGiftCard,
   renderItemsSection,
   renderBalanceSection,
+  renderItemStatusSection,
   renderBranchPill,
   renderRedeemSteps,
   renderCta,
@@ -17,7 +18,7 @@ const { buildMapModel, renderMapCard, renderMapScripts } = require('./map');
 const { renderPageScripts } = require('./scripts');
 const { renderNotFound } = require('./notFound');
 
-function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [], redeemableAt = null, balance = null }) {
+function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [], redeemableAt = null, balance = null, itemStatus = null }) {
   const theme = getTheme(gift.theme);
   const senderName = gift.sender_name || 'Someone';
   const message = gift.personal_message || '';
@@ -27,10 +28,12 @@ function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientNa
 
   const map = buildMapModel(branches, merchantName);
 
-  // Sections stagger-animate in order via --i; balance is optional so the
-  // indices for everything after it shift only when it's actually rendered.
+  // Sections stagger-animate in order via --i; balance/itemStatus are
+  // optional and mutually exclusive (credit vs. item gift) so they share a
+  // slot — indices for everything after only shift when one is rendered.
   let i = 1;
   const balanceIndex = i++;
+  const itemStatusIndex = balanceIndex;
   const branchPillIndex = i++;
   const redeemStepsIndex = i++;
   const mapIndex = i++;
@@ -62,6 +65,7 @@ ${renderGiftCard({ theme, displayRecipient, message, merchantName, itemName, sen
     <div class="reveal-content">
 ${renderItemsSection({ items, redemptionCode, qrUrl: redemptionQr })}
 ${renderBalanceSection({ balance, styleIndex: balanceIndex })}
+${renderItemStatusSection({ itemStatus, styleIndex: itemStatusIndex })}
 ${renderBranchPill({ branchCount: branches.length, redeemableAt, merchantName, styleIndex: branchPillIndex })}
 ${renderRedeemSteps({ redeemableAt, merchantName, styleIndex: redeemStepsIndex })}
 ${map.hasMap ? renderMapCard(map, merchantName, mapIndex) : ''}
