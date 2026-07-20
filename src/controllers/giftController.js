@@ -52,6 +52,15 @@ const saveRetryDraft = async (req, res, next) => {
   }
 };
 
+const listDrafts = async (req, res, next) => {
+  try {
+    const drafts = await giftService.listDrafts(req.userId);
+    return successResponse(res, { drafts, count: drafts.length });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const getRetryDraft = async (req, res, next) => {
   try {
     const draft = await giftService.getRetryDraft(req.params.draft_id, req.userId);
@@ -123,5 +132,6 @@ module.exports = {
   confirmPayment,
   saveRetryDraft,
   getRetryDraft,
+  listDrafts,
   deleteRetryDraft,
 };

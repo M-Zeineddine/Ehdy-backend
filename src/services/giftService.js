@@ -614,6 +614,7 @@ async function failGiftFromTap(tapChargeId) {
  */
 async function saveRetryDraft(userId, data) {
   let {
+    draft_id,
     merchant_item_id,
     custom_credit_amount,
     custom_credit_currency,
@@ -624,6 +625,29 @@ async function saveRetryDraft(userId, data) {
     theme,
     recipient_phone,
   } = data;
+
+  // Re-saving an existing draft (payment retry, explicit re-save) updates in
+  // place — otherwise every attempt would orphan a duplicate row in the list.
+  if (draft_id) {
+    const updated = await query(
+      `UPDATE gift_drafts SET
+         sender_name = $3, recipient_name = $4, personal_message = $5,
+         theme = $6, recipient_phone = $7, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2 AND status = 'draft'
+       RETURNING id`,
+      [
+        draft_id,
+        userId,
+        sender_name || null,
+        recipient_name || null,
+        personal_message || null,
+        theme || null,
+        recipient_phone || null,
+      ]
+    );
+    if (updated.rows.length) return updated.rows[0];
+    // Draft no longer exists — fall through and insert a fresh one
+  }
 
   const result = await query(
     `INSERT INTO gift_drafts
@@ -686,6 +710,43 @@ async function getRetryDraft(draftId, userId) {
 }
 
 /**
+ * List the user's saved drafts with joined item/merchant details, newest first.
+ */
+async function listDrafts(userId) {
+  const result = await query(
+    `SELECT
+       gd.id,
+       gd.merchant_item_id,
+       gd.custom_credit_amount,
+       gd.custom_credit_currency,
+       gd.custom_credit_merchant_id,
+       gd.sender_name,
+       gd.recipient_name,
+       gd.personal_message,
+       gd.theme,
+       gd.recipient_phone,
+       gd.updated_at,
+       COALESCE(mi.name, 'Store Credit')              AS item_name,
+       mi.description                                  AS item_description,
+       COALESCE(mi.price, gd.custom_credit_amount)    AS item_price,
+       COALESCE(mi.currency_code, gd.custom_credit_currency) AS item_currency,
+       mi.image_url                                    AS item_image,
+       m.id                                            AS merchant_id,
+       m.name                                          AS merchant_name,
+       m.logo_url                                      AS merchant_logo,
+       (gd.custom_credit_amount IS NOT NULL)           AS is_credit
+     FROM gift_drafts gd
+     LEFT JOIN merchant_items mi ON mi.id = gd.merchant_item_id
+     LEFT JOIN merchants m ON m.id = COALESCE(mi.merchant_id, gd.custom_credit_merchant_id)
+     WHERE gd.user_id = $1 AND gd.status = 'draft'
+     ORDER BY gd.updated_at DESC
+     LIMIT 100`,
+    [userId]
+  );
+  return result.rows;
+}
+
+/**
  * Delete a retry draft (called after payment succeeds).
  */
 async function deleteRetryDraft(draftId, userId) {
@@ -703,5 +764,6 @@ module.exports = {
   failGiftFromTap,
   saveRetryDraft,
   getRetryDraft,
+  listDrafts,
   deleteRetryDraft,
 };
