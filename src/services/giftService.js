@@ -125,6 +125,135 @@ async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', rede
 }
 
 /**
+ * Full detail for one received gift — the in-app equivalent of the public
+ * gift page, scoped to the recipient so it never leaks another user's gift.
+ * Mirrors routes/giftPage.js's data shape (balance ledger for store-credit
+ * gifts, one-shot redeemed status for items) but as JSON for the app.
+ */
+async function getReceivedGiftDetail(userId, giftSentId) {
+  const result = await query(
+    `SELECT
+       gs.id, gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme, gs.sent_at,
+       gs.merchant_item_id, gs.custom_credit_merchant_id,
+       gs.custom_credit_amount, gs.custom_credit_currency,
+       mi.name          AS item_name,
+       mi.description   AS item_description,
+       mi.price         AS item_price,
+       mi.currency_code AS item_currency,
+       mi.image_url     AS item_image,
+       mi_m.id          AS item_merchant_id,
+       mi_m.name        AS item_merchant,
+       mi_m.logo_url    AS item_merchant_logo,
+       cc_m.id          AS credit_merchant_id,
+       cc_m.name        AS credit_merchant,
+       cc_m.logo_url    AS credit_merchant_logo,
+       gi.id            AS gift_instance_id,
+       gi.redemption_code, gi.redemption_qr_code,
+       gi.initial_balance, gi.current_balance, gi.currency_code AS instance_currency,
+       gi.is_redeemed, gi.redeemed_at
+     FROM gifts_sent gs
+     LEFT JOIN merchant_items mi  ON mi.id    = gs.merchant_item_id
+     LEFT JOIN merchants mi_m     ON mi_m.id  = mi.merchant_id
+     LEFT JOIN merchants cc_m     ON cc_m.id  = gs.custom_credit_merchant_id
+     LEFT JOIN gift_instances gi  ON gi.gift_sent_id = gs.id
+     WHERE gs.id = $1 AND gs.recipient_user_id = $2 AND gs.payment_status = 'paid'
+     LIMIT 1`,
+    [giftSentId, userId]
+  );
+  if (!result.rows.length) throw new AppError('Gift not found', 404, 'GIFT_NOT_FOUND');
+
+  const row = result.rows[0];
+  const isCredit = !!row.custom_credit_merchant_id;
+  const merchantId = isCredit ? row.credit_merchant_id : row.item_merchant_id;
+
+  const branchesResult = await query(
+    `SELECT id, name, address, city, latitude, longitude
+     FROM merchant_branches
+     WHERE merchant_id = $1 AND is_active = true
+     ORDER BY name`,
+    [merchantId || null]
+  );
+  let branches = branchesResult.rows;
+  let redeemableAt = null;
+  if (row.merchant_item_id && branches.length) {
+    const scopeResult = await query(
+      'SELECT branch_id FROM merchant_item_branches WHERE merchant_item_id = $1',
+      [row.merchant_item_id]
+    );
+    if (scopeResult.rows.length) {
+      const allowed = new Set(scopeResult.rows.map((r) => r.branch_id));
+      const scoped = branches.filter((b) => allowed.has(b.id));
+      if (scoped.length) {
+        branches = scoped;
+        redeemableAt = scoped.map((b) => b.name);
+      }
+    }
+  }
+
+  let balance = null;
+  let itemStatus = null;
+  if (row.gift_instance_id) {
+    if (isCredit) {
+      const history = await query(
+        `SELECT re.amount, re.currency_code, re.redeemed_at, b.name AS branch_name
+         FROM redemption_events re
+         LEFT JOIN merchant_branches b ON b.id = re.branch_id
+         WHERE re.gift_instance_id = $1
+         ORDER BY re.redeemed_at DESC`,
+        [row.gift_instance_id]
+      );
+      balance = {
+        currency: row.instance_currency,
+        initial: row.initial_balance,
+        current: row.current_balance,
+        merchantName: row.credit_merchant,
+        history: history.rows,
+      };
+    } else if (row.is_redeemed) {
+      const event = await query(
+        `SELECT re.redeemed_at, b.name AS branch_name
+         FROM redemption_events re
+         LEFT JOIN merchant_branches b ON b.id = re.branch_id
+         WHERE re.gift_instance_id = $1
+         ORDER BY re.redeemed_at DESC
+         LIMIT 1`,
+        [row.gift_instance_id]
+      );
+      itemStatus = {
+        redeemedAt: row.redeemed_at,
+        merchantName: row.item_merchant,
+        branchName: event.rows[0]?.branch_name || null,
+      };
+    }
+  }
+
+  return {
+    id: row.id,
+    sender_name: row.sender_name,
+    recipient_name: row.recipient_name,
+    personal_message: row.personal_message,
+    theme: row.theme,
+    sent_at: row.sent_at,
+    is_credit: isCredit,
+    merchant_name: isCredit ? row.credit_merchant : row.item_merchant,
+    merchant_logo: isCredit ? row.credit_merchant_logo : row.item_merchant_logo,
+    item_name: isCredit
+      ? null
+      : (row.item_name || 'Gift'),
+    item_description: isCredit ? null : row.item_description,
+    item_price: isCredit ? row.custom_credit_amount : row.item_price,
+    item_currency: isCredit ? (row.custom_credit_currency || 'USD') : row.item_currency,
+    item_image: isCredit ? null : row.item_image,
+    redemption_code: row.redemption_code,
+    redemption_qr_code: row.redemption_qr_code,
+    branches,
+    redeemable_at: redeemableAt,
+    balance,
+    item_status: itemStatus,
+  };
+}
+
+/**
  * Claim a gift via share code. Adds to the claiming user's wallet.
  */
 async function claimGift(shareCode, userId) {
@@ -756,6 +885,7 @@ async function deleteRetryDraft(draftId, userId) {
 module.exports = {
   getSentGifts,
   getReceivedGifts,
+  getReceivedGiftDetail,
   claimGift,
   initiateGiftPayment,
   fulfillGiftFromTap,

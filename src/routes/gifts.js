@@ -189,6 +189,7 @@ router.get('/drafts/:draft_id', giftController.getRetryDraft);
 router.delete('/drafts/:draft_id', giftController.deleteRetryDraft);
 router.get('/sent', paginationValidation, validate, giftController.getSentGifts);
 router.get('/received', paginationValidation, validate, giftController.getReceivedGifts);
+router.get('/received/:id', uuidParamValidation('id'), validate, giftController.getReceivedGiftDetail);
 router.post('/claim/:share_code', claimLimiter, giftController.claimGift);
 
 // Registered after the literal routes so ':id' cannot shadow them. UUID-checked

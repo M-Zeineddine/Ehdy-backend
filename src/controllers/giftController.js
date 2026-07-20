@@ -24,6 +24,15 @@ const getReceivedGifts = async (req, res, next) => {
   }
 };
 
+const getReceivedGiftDetail = async (req, res, next) => {
+  try {
+    const gift = await giftService.getReceivedGiftDetail(req.userId, req.params.id);
+    return successResponse(res, { gift });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const claimGift = async (req, res, next) => {
   try {
     const { share_code } = req.params;
@@ -127,6 +136,7 @@ module.exports = {
   getSentGifts,
   getPaymentStatus,
   getReceivedGifts,
+  getReceivedGiftDetail,
   claimGift,
   initiatePayment,
   confirmPayment,
