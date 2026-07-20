@@ -10,7 +10,7 @@ async function fetchGift(shareCode) {
     `SELECT
        gs.sender_name, gs.recipient_name, gs.personal_message, gs.theme, gs.payment_status,
        gs.merchant_item_id, gs.custom_credit_merchant_id,
-       gs.custom_credit_amount, gs.custom_credit_currency,
+       gs.custom_credit_amount, gs.custom_credit_currency, gs.sent_at,
        mi.name          AS item_name,
        mi.price         AS item_price,
        mi.currency_code AS item_currency,
@@ -123,6 +123,8 @@ router.get('/:shareCode', async (req, res) => {
       currency: row.instance_currency,
       initial: row.initial_balance,
       current: row.current_balance,
+      merchantName: row.credit_merchant,
+      sentAt: row.sent_at,
       history: await fetchRedemptionHistory(row.gift_instance_id),
     } : null;
 

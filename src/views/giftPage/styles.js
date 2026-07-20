@@ -429,30 +429,34 @@ function pageStyles([c1, c2]) {
       flex-direction: column;
     }
     .history-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr auto;
+      display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 0;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
       border-top: 1px solid #F0EBE5;
-      font-size: 13px;
     }
-    .history-date { color: #A89990; }
-    .history-where {
-      color: #7A6A62;
+    .history-info { min-width: 0; }
+    .history-entry-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1C1410;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .history-amount {
-      font-weight: 700;
-      color: #1C1410;
-      text-align: right;
-    }
-    .history-empty {
-      font-size: 13px;
+    .history-entry-date {
+      font-size: 12px;
       color: #A89990;
+      margin-top: 1px;
     }
+    .history-amount {
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .history-amount-positive { color: #16A34A; }
+    .history-amount-negative { color: #E53935; }
 
     /* ── How to redeem ── */
     .redeem-section { padding: 0; }

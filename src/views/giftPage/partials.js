@@ -116,25 +116,46 @@ function renderItemsSection({ items, redemptionCode, qrUrl }) {
     </div>`;
 }
 
+function formatHistoryDate(iso) {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+
 /**
  * Balance + redemption history for store-credit gifts — the only type with
- * partial redemption. One row per redemption: date, amount, and where.
+ * partial redemption. A single ledger, newest first: the original gift
+ * credit (green, +) and each redemption (red, -), each one title+date row
+ * with the amount on the right.
  */
 function renderBalanceSection({ balance, styleIndex }) {
   if (!balance) return '';
-  const { currency, initial, current, history } = balance;
+  const { currency, initial, current, history, merchantName, sentAt } = balance;
   const initialNum = parseFloat(initial) || 0;
   const currentNum = parseFloat(current) || 0;
   const pctLeft = initialNum > 0 ? Math.max(0, Math.min(100, (currentNum / initialNum) * 100)) : 100;
 
-  const rows = history.map(h => {
-    const date = new Date(h.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const where = h.branch_name || 'In-store';
+  const entries = history.map(h => ({
+    title: h.branch_name ? `${merchantName} — ${h.branch_name}` : merchantName,
+    date: h.redeemed_at,
+    amount: -parseFloat(h.amount),
+    currencyCode: h.currency_code || currency,
+  }));
+  if (sentAt) {
+    entries.push({ title: 'Gift received 🎁', date: sentAt, amount: initialNum, currencyCode: currency });
+  }
+  entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const rows = entries.map(e => {
+    const positive = e.amount >= 0;
+    const sign = positive ? '+' : '-';
     return `
         <div class="history-row">
-          <span class="history-date">${escapeHtml(date)}</span>
-          <span class="history-where">${escapeHtml(where)}</span>
-          <span class="history-amount">-${escapeHtml(h.currency_code || currency)} ${parseFloat(h.amount).toFixed(2)}</span>
+          <div class="history-info">
+            <p class="history-entry-title">${escapeHtml(e.title)}</p>
+            <p class="history-entry-date">${escapeHtml(formatHistoryDate(e.date))}</p>
+          </div>
+          <span class="history-amount ${positive ? 'history-amount-positive' : 'history-amount-negative'}">${sign}${escapeHtml(e.currencyCode)} ${Math.abs(e.amount).toFixed(2)}</span>
         </div>`;
   }).join('');
 
@@ -153,12 +174,11 @@ function renderBalanceSection({ balance, styleIndex }) {
       </div>
       <div class="balance-bar-track"><div class="balance-bar-fill" style="width:${pctLeft.toFixed(1)}%"></div></div>
 
-      ${history.length ? `
+      ${entries.length ? `
       <div class="history-list">
-        <p class="history-title">Redemption history</p>
+        <p class="history-title">History</p>
         ${rows}
-      </div>` : `
-      <p class="history-empty">No redemptions yet — the full balance is available.</p>`}
+      </div>` : ''}
     </div>`;
 }
 
