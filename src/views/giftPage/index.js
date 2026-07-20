@@ -8,6 +8,7 @@ const {
   renderHeader,
   renderGiftCard,
   renderItemsSection,
+  renderBalanceSection,
   renderBranchPill,
   renderRedeemSteps,
   renderCta,
@@ -16,7 +17,7 @@ const { buildMapModel, renderMapCard, renderMapScripts } = require('./map');
 const { renderPageScripts } = require('./scripts');
 const { renderNotFound } = require('./notFound');
 
-function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [], redeemableAt = null }) {
+function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientName, branches = [], redeemableAt = null, balance = null }) {
   const theme = getTheme(gift.theme);
   const senderName = gift.sender_name || 'Someone';
   const message = gift.personal_message || '';
@@ -25,6 +26,15 @@ function renderGiftPage({ gift, items, redemptionCode, redemptionQr, recipientNa
   const itemName = items[0]?.itemName || '';
 
   const map = buildMapModel(branches, merchantName);
+
+  // Sections stagger-animate in order via --i; balance is optional so the
+  // indices for everything after it shift only when it's actually rendered.
+  let i = 1;
+  const balanceIndex = i++;
+  const branchPillIndex = i++;
+  const redeemStepsIndex = i++;
+  const mapIndex = i++;
+  const ctaIndex = i++;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -51,10 +61,11 @@ ${renderGiftCard({ theme, displayRecipient, message, merchantName, itemName, sen
 
     <div class="reveal-content">
 ${renderItemsSection({ items, redemptionCode, qrUrl: redemptionQr })}
-${renderBranchPill({ branchCount: branches.length, redeemableAt, merchantName })}
-${renderRedeemSteps({ redeemableAt, merchantName })}
-${map.hasMap ? renderMapCard(map, merchantName) : ''}
-${renderCta()}
+${renderBalanceSection({ balance, styleIndex: balanceIndex })}
+${renderBranchPill({ branchCount: branches.length, redeemableAt, merchantName, styleIndex: branchPillIndex })}
+${renderRedeemSteps({ redeemableAt, merchantName, styleIndex: redeemStepsIndex })}
+${map.hasMap ? renderMapCard(map, merchantName, mapIndex) : ''}
+${renderCta({ styleIndex: ctaIndex })}
     </div><!-- /.reveal-content -->
   </div>
 ${renderPageScripts(lottieUrlFor(theme))}

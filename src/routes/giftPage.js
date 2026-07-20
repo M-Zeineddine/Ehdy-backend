@@ -21,7 +21,9 @@ async function fetchGift(shareCode) {
        cc_m.id          AS credit_merchant_id,
        cc_m.name        AS credit_merchant,
        cc_m.logo_url    AS credit_merchant_logo,
-       gi.redemption_code, gi.redemption_qr_code
+       gi.id            AS gift_instance_id,
+       gi.redemption_code, gi.redemption_qr_code,
+       gi.initial_balance, gi.current_balance, gi.currency_code AS instance_currency
      FROM gifts_sent gs
      LEFT JOIN merchant_items mi  ON mi.id    = gs.merchant_item_id
      LEFT JOIN merchants mi_m     ON mi_m.id  = mi.merchant_id
@@ -42,6 +44,23 @@ async function fetchBranches(merchantId) {
      WHERE merchant_id = $1 AND is_active = true
      ORDER BY name`,
     [merchantId]
+  );
+  return result.rows;
+}
+
+/**
+ * Redemption history for a store-credit gift, newest first — the only gift
+ * type with partial redemption (merchant items are claimed once, in full).
+ */
+async function fetchRedemptionHistory(giftInstanceId) {
+  const result = await query(
+    `SELECT re.amount, re.currency_code, re.balance_after, re.redeemed_at,
+            b.name AS branch_name
+     FROM redemption_events re
+     LEFT JOIN merchant_branches b ON b.id = re.branch_id
+     WHERE re.gift_instance_id = $1
+     ORDER BY re.redeemed_at DESC`,
+    [giftInstanceId]
   );
   return result.rows;
 }
@@ -100,6 +119,13 @@ router.get('/:shareCode', async (req, res) => {
     const allBranches = await fetchBranches(merchantId);
     const { branches, redeemableAt } = await scopeBranches(row.merchant_item_id, allBranches);
 
+    const balance = isCredit && row.gift_instance_id ? {
+      currency: row.instance_currency,
+      initial: row.initial_balance,
+      current: row.current_balance,
+      history: await fetchRedemptionHistory(row.gift_instance_id),
+    } : null;
+
     res.send(renderGiftPage({
       gift: row,
       // items array — bundle gifts will pass multiple entries here
@@ -109,6 +135,7 @@ router.get('/:shareCode', async (req, res) => {
       recipientName: row.recipient_name || null,
       branches,
       redeemableAt,
+      balance,
     }));
   } catch (err) {
     logger.error('Gift page error', { shareCode, error: err.message });

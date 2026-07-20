@@ -38,10 +38,10 @@ function buildMapModel(branches, merchantName) {
   };
 }
 
-function renderMapCard(map, merchantName) {
+function renderMapCard(map, merchantName, styleIndex) {
   return `
     <!-- Branches map -->
-    <div class="map-card" style="--i:3">
+    <div class="map-card" style="--i:${styleIndex}">
       <div id="branch-map" class="map-canvas" aria-label="Branches map"></div>
       <div class="map-footer">
         <span class="map-merchant-name">${escapeHtml(merchantName)}</span>

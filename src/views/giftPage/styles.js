@@ -378,6 +378,82 @@ function pageStyles([c1, c2]) {
       color: #A89990;
     }
 
+    /* ── Balance + redemption history ── */
+    .balance-section { padding: 20px 16px; }
+    .balance-summary {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .balance-stat-right { text-align: right; }
+    .balance-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #A89990;
+      margin-bottom: 3px;
+    }
+    .balance-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: #7A6A62;
+    }
+    .balance-value-main {
+      font-size: 24px;
+      color: #F07856;
+    }
+    .balance-bar-track {
+      height: 6px;
+      border-radius: 999px;
+      background: #F0EBE5;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+    .balance-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: #F07856;
+    }
+    .history-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: #A89990;
+      margin-bottom: 10px;
+    }
+    .history-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .history-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 0;
+      border-top: 1px solid #F0EBE5;
+      font-size: 13px;
+    }
+    .history-date { color: #A89990; }
+    .history-where {
+      color: #7A6A62;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .history-amount {
+      font-weight: 700;
+      color: #1C1410;
+      text-align: right;
+    }
+    .history-empty {
+      font-size: 13px;
+      color: #A89990;
+    }
+
     /* ── How to redeem ── */
     .redeem-section { padding: 0; }
     .redeem-title {

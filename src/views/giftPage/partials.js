@@ -116,11 +116,57 @@ function renderItemsSection({ items, redemptionCode, qrUrl }) {
     </div>`;
 }
 
-function renderBranchPill({ branchCount, redeemableAt, merchantName }) {
+/**
+ * Balance + redemption history for store-credit gifts — the only type with
+ * partial redemption. One row per redemption: date, amount, and where.
+ */
+function renderBalanceSection({ balance, styleIndex }) {
+  if (!balance) return '';
+  const { currency, initial, current, history } = balance;
+  const initialNum = parseFloat(initial) || 0;
+  const currentNum = parseFloat(current) || 0;
+  const pctLeft = initialNum > 0 ? Math.max(0, Math.min(100, (currentNum / initialNum) * 100)) : 100;
+
+  const rows = history.map(h => {
+    const date = new Date(h.redeemed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const where = h.branch_name || 'In-store';
+    return `
+        <div class="history-row">
+          <span class="history-date">${escapeHtml(date)}</span>
+          <span class="history-where">${escapeHtml(where)}</span>
+          <span class="history-amount">-${escapeHtml(h.currency_code || currency)} ${parseFloat(h.amount).toFixed(2)}</span>
+        </div>`;
+  }).join('');
+
+  return `
+    <!-- Balance + redemption history -->
+    <div class="section-card balance-section" style="--i:${styleIndex}">
+      <div class="balance-summary">
+        <div class="balance-stat">
+          <p class="balance-label">Remaining</p>
+          <p class="balance-value balance-value-main">${escapeHtml(currency)} ${currentNum.toFixed(2)}</p>
+        </div>
+        <div class="balance-stat balance-stat-right">
+          <p class="balance-label">Original</p>
+          <p class="balance-value">${escapeHtml(currency)} ${initialNum.toFixed(2)}</p>
+        </div>
+      </div>
+      <div class="balance-bar-track"><div class="balance-bar-fill" style="width:${pctLeft.toFixed(1)}%"></div></div>
+
+      ${history.length ? `
+      <div class="history-list">
+        <p class="history-title">Redemption history</p>
+        ${rows}
+      </div>` : `
+      <p class="history-empty">No redemptions yet — the full balance is available.</p>`}
+    </div>`;
+}
+
+function renderBranchPill({ branchCount, redeemableAt, merchantName, styleIndex }) {
   if (!branchCount && !redeemableAt) return '';
   return `
     <!-- Branch availability -->
-    <div style="--i:1;display:flex;align-items:center;gap:8px;justify-content:center;background:${redeemableAt ? '#FFF7ED' : '#F0FDF4'};border:1px solid ${redeemableAt ? '#FED7AA' : '#BBF7D0'};border-radius:999px;padding:8px 16px;align-self:center;">
+    <div style="--i:${styleIndex};display:flex;align-items:center;gap:8px;justify-content:center;background:${redeemableAt ? '#FFF7ED' : '#F0FDF4'};border:1px solid ${redeemableAt ? '#FED7AA' : '#BBF7D0'};border-radius:999px;padding:8px 16px;align-self:center;">
       <span>📍</span>
       <span style="font-size:13px;font-weight:600;color:${redeemableAt ? '#9A3412' : '#166534'};">
         ${redeemableAt
@@ -130,7 +176,7 @@ function renderBranchPill({ branchCount, redeemableAt, merchantName }) {
     </div>`;
 }
 
-function renderRedeemSteps({ redeemableAt, merchantName }) {
+function renderRedeemSteps({ redeemableAt, merchantName, styleIndex }) {
   const steps = [
     {
       title: redeemableAt
@@ -150,7 +196,7 @@ function renderRedeemSteps({ redeemableAt, merchantName }) {
 
   return `
     <!-- How to redeem -->
-    <div class="redeem-section" style="--i:2">
+    <div class="redeem-section" style="--i:${styleIndex}">
       <p class="redeem-title">How to redeem</p>
       <div class="steps">
         ${steps.map((step, i) => `
@@ -168,10 +214,10 @@ function renderRedeemSteps({ redeemableAt, merchantName }) {
     </div>`;
 }
 
-function renderCta() {
+function renderCta({ styleIndex }) {
   return `
     <!-- CTA -->
-    <div style="--i:4">
+    <div style="--i:${styleIndex}">
       <a href="ehdyapp://open-gift" class="cta-btn">Open in Ehdy App</a>
 
       <p class="footer">Powered by Ehdy</p>
@@ -183,6 +229,7 @@ module.exports = {
   renderHeader,
   renderGiftCard,
   renderItemsSection,
+  renderBalanceSection,
   renderBranchPill,
   renderRedeemSteps,
   renderCta,
