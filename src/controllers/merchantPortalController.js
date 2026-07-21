@@ -120,14 +120,26 @@ const confirmRedemption = async (req, res, next) => {
 
 const getRedemptions = async (req, res, next) => {
   try {
-    const { page, limit, period, type, status } = req.query;
+    const { page, limit, period, type, status, branch_id } = req.query;
+
+    // req.branchIds is the caller's permitted scope (null = all branches, an
+    // owner). A requested branch_id can only narrow that scope, never widen
+    // it — reject outright rather than silently falling back to full scope.
+    let branchIds = req.branchIds;
+    if (branch_id) {
+      if (branchIds && !branchIds.includes(branch_id)) {
+        return next(new AppError('You do not have access to this branch.', 403, 'BRANCH_FORBIDDEN'));
+      }
+      branchIds = [branch_id];
+    }
+
     const result = await redemptionService.getMerchantRedemptions(req.merchantId, {
       page,
       limit,
       period,
       type,
       status,
-      branchIds: req.branchIds,
+      branchIds,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);
   } catch (err) {

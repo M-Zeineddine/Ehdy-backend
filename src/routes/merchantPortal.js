@@ -15,6 +15,7 @@ const {
   staffCreateValidation,
   staffUpdateValidation,
   paginationValidation,
+  branchFilterValidation,
   uuidParamValidation,
 } = require('../utils/validators');
 
@@ -156,7 +157,7 @@ router.post(
   validate,
   merchantPortalController.confirmRedemption
 );
-router.get('/redemptions', requireMerchantRole('owner', 'manager'), paginationValidation, validate, merchantPortalController.getRedemptions);
+router.get('/redemptions', requireMerchantRole('owner', 'manager'), paginationValidation, branchFilterValidation, validate, merchantPortalController.getRedemptions);
 router.get('/purchases', requireOwnerRole, paginationValidation, validate, merchantPortalController.getPurchases);
 router.get('/active-codes', requireMerchantRole('owner', 'manager'), paginationValidation, validate, merchantPortalController.getActiveCodes);
 
