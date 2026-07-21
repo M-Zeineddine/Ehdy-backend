@@ -49,8 +49,8 @@ const getDashboard = async (req, res, next) => {
 
 const getPurchases = async (req, res, next) => {
   try {
-    const { page, limit, date_from, date_to } = req.query;
-    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, date_from, date_to });
+    const { page, limit, period } = req.query;
+    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, period });
     return paginatedResponse(res, result.purchases, result.pagination);
   } catch (err) {
     return next(err);
@@ -120,12 +120,11 @@ const confirmRedemption = async (req, res, next) => {
 
 const getRedemptions = async (req, res, next) => {
   try {
-    const { page, limit, date_from, date_to } = req.query;
+    const { page, limit, period } = req.query;
     const result = await redemptionService.getMerchantRedemptions(req.merchantId, {
       page,
       limit,
-      date_from,
-      date_to,
+      period,
       branchIds: req.branchIds,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);

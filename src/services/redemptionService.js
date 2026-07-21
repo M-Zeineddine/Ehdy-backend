@@ -5,6 +5,7 @@ const { AppError } = require('../middleware/errorHandler');
 const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
 const { getRedisClient } = require('../config/redis');
+const { getPeriodBounds } = require('../utils/period');
 
 const REDEMPTION_OTP_TTL = 5 * 60; // 5 minutes
 
@@ -313,9 +314,10 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
  * be invisible (or merged into one row with a lifetime-cumulative amount)
  * even though each partial redemption is a separate real transaction.
  */
-async function getMerchantRedemptions(merchantId, { page, limit, date_from, date_to, branchIds = null }) {
+async function getMerchantRedemptions(merchantId, { page, limit, period, branchIds = null }) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+  const { date_from, date_to } = getPeriodBounds(period);
 
   const conditions = ['re.merchant_id = $1'];
   const params = [merchantId];

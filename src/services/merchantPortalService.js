@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const { query, withTransaction } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { getPeriodBounds } = require('../utils/period');
 
 /**
  * Merchant portal login.
@@ -100,11 +101,10 @@ async function merchantLogin({ email, password }) {
  * manager seeing company-wide sales figures would be confusing.
  */
 async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner') {
-  const today = new Date().toISOString().split('T')[0];
-  const startOfDay = `${today} 00:00:00`;
-  const endOfDay = `${today} 23:59:59`;
+  const { date_from: startOfDay, date_to: endOfDay } = getPeriodBounds('today');
+  const { date_from: startOfMonth, date_to: endOfMonth } = getPeriodBounds('month');
 
-  const redemptionParams = [startOfDay, endOfDay, merchantId];
+  const redemptionParams = [startOfDay, endOfDay, merchantId, startOfMonth, endOfMonth];
   let branchFilter = '';
   if (branchIds) {
     branchFilter = `AND re.branch_id = ANY($${redemptionParams.length + 1})`;
@@ -115,8 +115,8 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
     `SELECT
        COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_redemptions,
        SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_revenue,
-       COUNT(*) FILTER (WHERE DATE_TRUNC('month', re.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_redemptions,
-       SUM(re.amount) FILTER (WHERE DATE_TRUNC('month', re.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_revenue
+       COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $4 AND $5) AS month_redemptions,
+       SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $4 AND $5) AS month_revenue
      FROM redemption_events re
      WHERE re.merchant_id = $3 ${branchFilter}`,
     redemptionParams
@@ -151,13 +151,13 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
       `SELECT
          COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $1 AND $2) AS today_sold,
          SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $1 AND $2) AS today_revenue,
-         COUNT(*) FILTER (WHERE DATE_TRUNC('month', gs.sent_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_sold,
-         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE DATE_TRUNC('month', gs.sent_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_revenue
+         COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $4 AND $5) AS month_sold,
+         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $4 AND $5) AS month_revenue
        FROM gifts_sent gs
        LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
        WHERE gs.payment_status = 'paid'
          AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $3`,
-      [startOfDay, endOfDay, merchantId]
+      [startOfDay, endOfDay, merchantId, startOfMonth, endOfMonth]
     );
     const s = saleStats.rows[0];
     result.sales = {
@@ -174,9 +174,10 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
  * whether or not it's been redeemed yet. Not branch-scoped: a purchase
  * happens online, never at a specific branch.
  */
-async function getMerchantPurchases(merchantId, { page, limit, date_from, date_to } = {}) {
+async function getMerchantPurchases(merchantId, { page, limit, period } = {}) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+  const { date_from, date_to } = getPeriodBounds(period);
 
   const conditions = [
     `gs.payment_status = 'paid'`,
