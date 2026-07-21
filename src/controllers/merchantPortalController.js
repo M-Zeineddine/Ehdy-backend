@@ -120,12 +120,13 @@ const confirmRedemption = async (req, res, next) => {
 
 const getRedemptions = async (req, res, next) => {
   try {
-    const { page, limit, period, type } = req.query;
+    const { page, limit, period, type, status } = req.query;
     const result = await redemptionService.getMerchantRedemptions(req.merchantId, {
       page,
       limit,
       period,
       type,
+      status,
       branchIds: req.branchIds,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);

@@ -134,8 +134,45 @@ async function resolveRedemptionBranch(merchantId, { branch_id, scoped_branch_id
   return null;
 }
 
+/**
+ * Best-effort log of a failed redemption attempt — never lets a logging
+ * failure mask the real error the caller is about to see.
+ */
+async function logRedemptionAttempt({ merchantId, merchantUserId, branchId, attemptedCode, errorCode, errorMessage }) {
+  try {
+    await query(
+      `INSERT INTO redemption_attempts
+         (merchant_id, merchant_user_id, branch_id, attempted_code, error_code, error_message)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [merchantId, merchantUserId || null, branchId || null, attemptedCode, errorCode, errorMessage]
+    );
+  } catch (logErr) {
+    logger.error('Failed to log redemption attempt', { error: logErr.message });
+  }
+}
+
 async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id, branch_id, scoped_branch_ids }) {
-  const effectiveBranchId = await resolveRedemptionBranch(merchantId, { branch_id, scoped_branch_ids });
+  // Best-effort "where" for the failure log — resolveRedemptionBranch below
+  // may replace this with the properly resolved branch, or may itself throw
+  // before that happens, in which case this raw value is what we log.
+  let effectiveBranchId = branch_id || null;
+  try {
+    effectiveBranchId = await resolveRedemptionBranch(merchantId, { branch_id, scoped_branch_ids });
+    return await performRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id }, effectiveBranchId);
+  } catch (err) {
+    logRedemptionAttempt({
+      merchantId,
+      merchantUserId: merchant_user_id,
+      branchId: effectiveBranchId,
+      attemptedCode: redemptionCode,
+      errorCode: err.code || 'UNKNOWN_ERROR',
+      errorMessage: err.message,
+    });
+    throw err;
+  }
+}
+
+async function performRedemption(redemptionCode, merchantId, { amount_to_redeem, notes, merchant_user_id }, effectiveBranchId) {
   // OTP_VERIFICATION_ENABLED: set to true to re-enable recipient OTP check
   const OTP_VERIFICATION_ENABLED = false;
   if (OTP_VERIFICATION_ENABLED) {
@@ -307,57 +344,101 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
 }
 
 /**
- * Get redemption history for a merchant — one row per actual redemption
- * transaction (redemption_events), not per gift card. gift_instances only
- * tracks current state: redeemed_at/redeemed_amount there only update once a
- * card becomes FULLY redeemed, so a partially-redeemed card would otherwise
- * be invisible (or merged into one row with a lifetime-cumulative amount)
- * even though each partial redemption is a separate real transaction.
+ * Get redemption history for a merchant — a merged feed of two sources:
+ *   - redemption_events: one row per actual successful transaction. Never
+ *     read gift_instances.redeemed_at/redeemed_amount for this — those only
+ *     update once a card becomes FULLY redeemed, silently hiding partials.
+ *   - redemption_attempts: failed attempts (invalid code, already redeemed,
+ *     insufficient balance, wrong branch, ...). These never touched a gift
+ *     instance, so they carry no type/amount/customer info by construction —
+ *     showing that data would either be wrong or, for WRONG_MERCHANT, leak
+ *     another merchant's gift details.
+ *
+ * status filter selects which source(s) run: 'partial'/'completed' only
+ * query events; 'failed' only queries attempts; 'all' unions both. The type
+ * filter (store_credit/gift_item) only ever applies to the events side —
+ * attempts have no type, so they pass through regardless of that filter.
  */
-async function getMerchantRedemptions(merchantId, { page, limit, period, type, branchIds = null }) {
+async function getMerchantRedemptions(merchantId, { page, limit, period, type, status, branchIds = null }) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const { date_from, date_to } = getPeriodBounds(period);
 
-  const conditions = ['re.merchant_id = $1'];
+  // status is undefined/omitted for "All" (not the literal string 'all') —
+  // only 'partial'/'completed' should ever exclude one side of the union.
+  const includeEvents = status !== 'failed';
+  const includeAttempts = status !== 'partial' && status !== 'completed';
+
   const params = [merchantId];
   let idx = 2;
+  const branches = [];
 
-  if (date_from) { conditions.push(`re.redeemed_at >= $${idx++}`); params.push(date_from); }
-  if (date_to)   { conditions.push(`re.redeemed_at <= $${idx++}`); params.push(date_to); }
-  if (branchIds) { conditions.push(`re.branch_id = ANY($${idx++})`); params.push(branchIds); }
-  if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
-  if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
+  if (includeEvents) {
+    const conditions = ['re.merchant_id = $1'];
+    if (date_from) { conditions.push(`re.redeemed_at >= $${idx}`); params.push(date_from); idx++; }
+    if (date_to)   { conditions.push(`re.redeemed_at <= $${idx}`); params.push(date_to); idx++; }
+    if (branchIds) { conditions.push(`re.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
+    if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
+    if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
+    // Items are always one-shot (no balance) — only a store-credit event
+    // whose balance_after hit 0 counts as "completed"; anything else with
+    // money left is "partial". Derived from data already on the row.
+    if (status === 'completed') conditions.push('(gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0)');
+    if (status === 'partial')   conditions.push('(gi.merchant_item_id IS NULL AND re.balance_after > 0)');
 
-  const whereClause = conditions.join(' AND ');
+    branches.push(`
+      SELECT re.id, gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount,
+             re.currency_code, b.name AS branch_name, re.notes,
+             CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
+             CASE
+               WHEN gi.merchant_item_id IS NOT NULL THEN 'completed'
+               WHEN re.balance_after <= 0 THEN 'completed'
+               ELSE 'partial'
+             END AS status,
+             CASE
+               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
+               ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
+             END AS gift_card_name,
+             mi.description AS item_description, mi.image_url AS item_image,
+             gs.sender_name, gs.recipient_name, gs.recipient_phone,
+             NULL::text AS error_code, NULL::text AS error_message
+      FROM redemption_events re
+      JOIN gift_instances gi        ON gi.id = re.gift_instance_id
+      LEFT JOIN merchant_items mi   ON mi.id = gi.merchant_item_id
+      LEFT JOIN merchant_branches b ON b.id = re.branch_id
+      LEFT JOIN gifts_sent gs       ON gs.id = gi.gift_sent_id
+      WHERE ${conditions.join(' AND ')}
+    `);
+  }
 
-  const countResult = await query(
-    `SELECT COUNT(*) FROM redemption_events re JOIN gift_instances gi ON gi.id = re.gift_instance_id WHERE ${whereClause}`,
-    params
-  );
+  if (includeAttempts) {
+    const conditions = ['ra.merchant_id = $1'];
+    if (date_from) { conditions.push(`ra.attempted_at >= $${idx}`); params.push(date_from); idx++; }
+    if (date_to)   { conditions.push(`ra.attempted_at <= $${idx}`); params.push(date_to); idx++; }
+    if (branchIds) { conditions.push(`ra.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
+
+    branches.push(`
+      SELECT ra.id, ra.attempted_code AS redemption_code, ra.attempted_at AS redeemed_at,
+             NULL::numeric AS redeemed_amount, NULL::text AS currency_code, b.name AS branch_name,
+             NULL::text AS notes, NULL::text AS type, 'failed' AS status, NULL::text AS gift_card_name,
+             NULL::text AS item_description, NULL::text AS item_image,
+             NULL::text AS sender_name, NULL::text AS recipient_name, NULL::text AS recipient_phone,
+             ra.error_code, ra.error_message
+      FROM redemption_attempts ra
+      LEFT JOIN merchant_branches b ON b.id = ra.branch_id
+      WHERE ${conditions.join(' AND ')}
+    `);
+  }
+
+  const combinedSql = branches.join(' UNION ALL ');
+
+  const countResult = await query(`SELECT COUNT(*) FROM (${combinedSql}) combined`, params);
   const total = parseInt(countResult.rows[0].count, 10);
 
-  params.push(lim, offset);
-
+  const pageParams = [...params, lim, offset];
   const result = await query(
-    `SELECT re.id, gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount,
-            re.currency_code, b.name AS branch_name, re.notes,
-            CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
-            CASE
-              WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
-              ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
-            END AS gift_card_name,
-            mi.description AS item_description, mi.image_url AS item_image,
-            gs.sender_name, gs.recipient_name, gs.recipient_phone
-     FROM redemption_events re
-     JOIN gift_instances gi        ON gi.id = re.gift_instance_id
-     LEFT JOIN merchant_items mi   ON mi.id = gi.merchant_item_id
-     LEFT JOIN merchant_branches b ON b.id = re.branch_id
-     LEFT JOIN gifts_sent gs       ON gs.id = gi.gift_sent_id
-     WHERE ${whereClause}
-     ORDER BY re.redeemed_at DESC
-     LIMIT $${idx++} OFFSET $${idx++}`,
-    params
+    `SELECT * FROM (${combinedSql}) combined ORDER BY redeemed_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
+    pageParams
   );
 
   return {
