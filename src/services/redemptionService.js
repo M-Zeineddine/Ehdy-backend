@@ -341,16 +341,19 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, b
 
   const result = await query(
     `SELECT re.id, gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount,
-            re.currency_code, b.name AS branch_name,
+            re.currency_code, b.name AS branch_name, re.notes,
             CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
             CASE
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
               ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
-            END AS gift_card_name
+            END AS gift_card_name,
+            mi.description AS item_description, mi.image_url AS item_image,
+            gs.sender_name, gs.recipient_name, gs.recipient_phone
      FROM redemption_events re
      JOIN gift_instances gi        ON gi.id = re.gift_instance_id
      LEFT JOIN merchant_items mi   ON mi.id = gi.merchant_item_id
      LEFT JOIN merchant_branches b ON b.id = re.branch_id
+     LEFT JOIN gifts_sent gs       ON gs.id = gi.gift_sent_id
      WHERE ${whereClause}
      ORDER BY re.redeemed_at DESC
      LIMIT $${idx++} OFFSET $${idx++}`,

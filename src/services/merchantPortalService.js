@@ -202,14 +202,15 @@ async function getMerchantPurchases(merchantId, { page, limit, period, type } = 
   params.push(lim, offset);
 
   const result = await query(
-    `SELECT gs.id, gs.sent_at, gs.recipient_name,
+    `SELECT gs.id, gs.sent_at, gs.sender_name, gs.recipient_name, gs.recipient_phone, gs.personal_message,
             COALESCE(mi.price, gs.custom_credit_amount)          AS amount,
             COALESCE(mi.currency_code, gs.custom_credit_currency) AS currency_code,
             CASE WHEN gs.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
             CASE
               WHEN gs.merchant_item_id IS NOT NULL THEN mi.name
               ELSE CONCAT(gs.custom_credit_amount::text, ' ', gs.custom_credit_currency, ' Store Credit')
-            END AS gift_card_name
+            END AS gift_card_name,
+            mi.description AS item_description, mi.image_url AS item_image
      FROM gifts_sent gs
      ${joins}
      WHERE ${whereClause}
