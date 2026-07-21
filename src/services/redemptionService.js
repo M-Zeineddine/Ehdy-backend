@@ -314,7 +314,7 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
  * be invisible (or merged into one row with a lifetime-cumulative amount)
  * even though each partial redemption is a separate real transaction.
  */
-async function getMerchantRedemptions(merchantId, { page, limit, period, branchIds = null }) {
+async function getMerchantRedemptions(merchantId, { page, limit, period, type, branchIds = null }) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const { date_from, date_to } = getPeriodBounds(period);
@@ -326,11 +326,13 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, branchI
   if (date_from) { conditions.push(`re.redeemed_at >= $${idx++}`); params.push(date_from); }
   if (date_to)   { conditions.push(`re.redeemed_at <= $${idx++}`); params.push(date_to); }
   if (branchIds) { conditions.push(`re.branch_id = ANY($${idx++})`); params.push(branchIds); }
+  if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
+  if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
 
   const whereClause = conditions.join(' AND ');
 
   const countResult = await query(
-    `SELECT COUNT(*) FROM redemption_events re WHERE ${whereClause}`,
+    `SELECT COUNT(*) FROM redemption_events re JOIN gift_instances gi ON gi.id = re.gift_instance_id WHERE ${whereClause}`,
     params
   );
   const total = parseInt(countResult.rows[0].count, 10);

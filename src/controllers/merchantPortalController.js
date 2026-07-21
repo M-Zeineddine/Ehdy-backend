@@ -49,8 +49,8 @@ const getDashboard = async (req, res, next) => {
 
 const getPurchases = async (req, res, next) => {
   try {
-    const { page, limit, period } = req.query;
-    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, period });
+    const { page, limit, period, type } = req.query;
+    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, period, type });
     return paginatedResponse(res, result.purchases, result.pagination);
   } catch (err) {
     return next(err);
@@ -59,8 +59,8 @@ const getPurchases = async (req, res, next) => {
 
 const getActiveCodes = async (req, res, next) => {
   try {
-    const { page, limit } = req.query;
-    const result = await merchantPortalService.listActiveCodes(req.merchantId, { page, limit });
+    const { page, limit, type } = req.query;
+    const result = await merchantPortalService.listActiveCodes(req.merchantId, { page, limit, type });
     return paginatedResponse(res, result.codes, result.pagination);
   } catch (err) {
     return next(err);
@@ -120,11 +120,12 @@ const confirmRedemption = async (req, res, next) => {
 
 const getRedemptions = async (req, res, next) => {
   try {
-    const { page, limit, period } = req.query;
+    const { page, limit, period, type } = req.query;
     const result = await redemptionService.getMerchantRedemptions(req.merchantId, {
       page,
       limit,
       period,
+      type,
       branchIds: req.branchIds,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);

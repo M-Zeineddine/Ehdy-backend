@@ -174,7 +174,7 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
  * whether or not it's been redeemed yet. Not branch-scoped: a purchase
  * happens online, never at a specific branch.
  */
-async function getMerchantPurchases(merchantId, { page, limit, period } = {}) {
+async function getMerchantPurchases(merchantId, { page, limit, period, type } = {}) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const { date_from, date_to } = getPeriodBounds(period);
@@ -187,6 +187,8 @@ async function getMerchantPurchases(merchantId, { page, limit, period } = {}) {
   let idx = 2;
   if (date_from) { conditions.push(`gs.sent_at >= $${idx++}`); params.push(date_from); }
   if (date_to)   { conditions.push(`gs.sent_at <= $${idx++}`); params.push(date_to); }
+  if (type === 'gift_item')    conditions.push('gs.merchant_item_id IS NOT NULL');
+  if (type === 'store_credit') conditions.push('gs.merchant_item_id IS NULL');
 
   const whereClause = conditions.join(' AND ');
   const joins = 'LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id';
@@ -226,13 +228,18 @@ async function getMerchantPurchases(merchantId, { page, limit, period } = {}) {
  * Currently active (unredeemed, unexpired) gift codes for a merchant —
  * merchant-wide, since a code isn't tied to any branch until redeemed.
  */
-async function listActiveCodes(merchantId, { page, limit } = {}) {
+async function listActiveCodes(merchantId, { page, limit, type } = {}) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
 
-  const whereClause = `COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
-     AND gi.is_redeemed = FALSE
-     AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)`;
+  const conditions = [
+    `COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1`,
+    'gi.is_redeemed = FALSE',
+    '(gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)',
+  ];
+  if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
+  if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
+  const whereClause = conditions.join(' AND ');
   const joins = 'LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id';
 
   const countResult = await query(
