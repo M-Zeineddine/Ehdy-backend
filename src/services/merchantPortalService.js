@@ -93,18 +93,28 @@ async function merchantLogin({ email, password }) {
  * every partial redemption from these numbers entirely.
  *
  * branchIds: null = merchant-wide (owners, or managers with no branch
- * assignment); an array limits redemption stats to that branch. active_codes
- * stays merchant-wide because unredeemed codes aren't bound to a branch.
+ * assignment); an array limits redemption stats to that branch. active_codes,
+ * outstanding_balance, and lifetime stats stay merchant-wide — none of those
+ * are bound to a branch.
  *
- * Sales (purchase) stats are merchant-wide by nature — a purchase happens
- * online, not at a branch — so they're only included for owners; a branch
- * manager seeing company-wide sales figures would be confusing.
+ * Sales (purchase) stats, best_seller, branch_breakdown, and lifetime are
+ * only included for owners — company-wide financials a branch manager has
+ * no operational reason to see (and, for branch_breakdown, would otherwise
+ * reveal other branches' performance to a manager scoped to just one).
  */
 async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner') {
-  const { date_from: startOfDay, date_to: endOfDay } = getPeriodBounds('today');
-  const { date_from: startOfMonth, date_to: endOfMonth } = getPeriodBounds('month');
+  const today = getPeriodBounds('today');
+  const yesterday = getPeriodBounds('yesterday');
+  const month = getPeriodBounds('month');
+  const lastMonth = getPeriodBounds('last_month');
 
-  const redemptionParams = [startOfDay, endOfDay, merchantId, startOfMonth, endOfMonth];
+  const redemptionParams = [
+    today.date_from, today.date_to,
+    yesterday.date_from, yesterday.date_to,
+    month.date_from, month.date_to,
+    lastMonth.date_from, lastMonth.date_to,
+    merchantId,
+  ];
   let branchFilter = '';
   if (branchIds) {
     branchFilter = `AND re.branch_id = ANY($${redemptionParams.length + 1})`;
@@ -115,10 +125,14 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
     `SELECT
        COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_redemptions,
        SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_revenue,
-       COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $4 AND $5) AS month_redemptions,
-       SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $4 AND $5) AS month_revenue
+       COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $3 AND $4) AS yesterday_redemptions,
+       SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $3 AND $4) AS yesterday_revenue,
+       COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $5 AND $6) AS month_redemptions,
+       SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $5 AND $6) AS month_revenue,
+       COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $7 AND $8) AS last_month_redemptions,
+       SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $7 AND $8) AS last_month_revenue
      FROM redemption_events re
-     WHERE re.merchant_id = $3 ${branchFilter}`,
+     WHERE re.merchant_id = $9 ${branchFilter}`,
     redemptionParams
   );
 
@@ -132,37 +146,137 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
     [merchantId]
   );
 
+  // Outstanding balance: unredeemed store credit still in circulation — a
+  // liability figure, not tied to any branch (a customer can redeem it
+  // anywhere the merchant allows).
+  const outstanding = await query(
+    `SELECT COALESCE(SUM(gi.current_balance), 0) AS outstanding
+     FROM gift_instances gi
+     WHERE gi.custom_credit_merchant_id = $1 AND gi.is_redeemed = FALSE`,
+    [merchantId]
+  );
+
+  const failedToday = await query(
+    `SELECT COUNT(*) AS failed_today
+     FROM redemption_attempts ra
+     WHERE ra.merchant_id = $1 AND ra.attempted_at BETWEEN $2 AND $3`,
+    [merchantId, today.date_from, today.date_to]
+  );
+
   const r = redemptionStats.rows[0];
   const result = {
     today: {
       redemptions: parseInt(r.today_redemptions, 10) || 0,
       revenue: parseFloat(r.today_revenue) || 0,
     },
+    yesterday: {
+      redemptions: parseInt(r.yesterday_redemptions, 10) || 0,
+      revenue: parseFloat(r.yesterday_revenue) || 0,
+    },
     month: {
       redemptions: parseInt(r.month_redemptions, 10) || 0,
       revenue: parseFloat(r.month_revenue) || 0,
     },
+    last_month: {
+      redemptions: parseInt(r.last_month_redemptions, 10) || 0,
+      revenue: parseFloat(r.last_month_revenue) || 0,
+    },
     active_codes: parseInt(activeCodes.rows[0].active_codes, 10) || 0,
+    outstanding_balance: parseFloat(outstanding.rows[0].outstanding) || 0,
+    failed_attempts_today: parseInt(failedToday.rows[0].failed_today, 10) || 0,
     sales: null,
+    best_seller: null,
+    branch_breakdown: null,
+    lifetime: null,
   };
 
   if (role === 'owner') {
+    const saleParams = [
+      today.date_from, today.date_to,
+      yesterday.date_from, yesterday.date_to,
+      month.date_from, month.date_to,
+      lastMonth.date_from, lastMonth.date_to,
+      merchantId,
+    ];
     const saleStats = await query(
       `SELECT
          COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $1 AND $2) AS today_sold,
          SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $1 AND $2) AS today_revenue,
-         COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $4 AND $5) AS month_sold,
-         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $4 AND $5) AS month_revenue
+         COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $3 AND $4) AS yesterday_sold,
+         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $3 AND $4) AS yesterday_revenue,
+         COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $5 AND $6) AS month_sold,
+         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $5 AND $6) AS month_revenue,
+         COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $7 AND $8) AS last_month_sold,
+         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $7 AND $8) AS last_month_revenue
        FROM gifts_sent gs
        LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
        WHERE gs.payment_status = 'paid'
-         AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $3`,
-      [startOfDay, endOfDay, merchantId, startOfMonth, endOfMonth]
+         AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $9`,
+      saleParams
     );
     const s = saleStats.rows[0];
     result.sales = {
       today: { sold: parseInt(s.today_sold, 10) || 0, revenue: parseFloat(s.today_revenue) || 0 },
+      yesterday: { sold: parseInt(s.yesterday_sold, 10) || 0, revenue: parseFloat(s.yesterday_revenue) || 0 },
       month: { sold: parseInt(s.month_sold, 10) || 0, revenue: parseFloat(s.month_revenue) || 0 },
+      last_month: { sold: parseInt(s.last_month_sold, 10) || 0, revenue: parseFloat(s.last_month_revenue) || 0 },
+    };
+
+    const bestSeller = await query(
+      `SELECT mi.name, COUNT(*) AS times_sold
+       FROM gifts_sent gs
+       JOIN merchant_items mi ON mi.id = gs.merchant_item_id
+       WHERE gs.payment_status = 'paid' AND mi.merchant_id = $1
+       GROUP BY mi.id, mi.name
+       ORDER BY times_sold DESC
+       LIMIT 1`,
+      [merchantId]
+    );
+    if (bestSeller.rows.length) {
+      result.best_seller = {
+        name: bestSeller.rows[0].name,
+        count: parseInt(bestSeller.rows[0].times_sold, 10),
+      };
+    }
+
+    const branches = await query(
+      `SELECT b.id, b.name, COUNT(re.id) AS redemptions
+       FROM merchant_branches b
+       LEFT JOIN redemption_events re
+         ON re.branch_id = b.id AND re.redeemed_at BETWEEN $2 AND $3
+       WHERE b.merchant_id = $1 AND b.is_active = TRUE
+       GROUP BY b.id, b.name
+       ORDER BY redemptions DESC`,
+      [merchantId, today.date_from, today.date_to]
+    );
+    if (branches.rows.length > 1) {
+      result.branch_breakdown = branches.rows.map((row) => ({
+        branch_id: row.id,
+        branch_name: row.name,
+        redemptions: parseInt(row.redemptions, 10),
+      }));
+    }
+
+    const lifetimeSales = await query(
+      `SELECT COALESCE(SUM(COALESCE(mi.price, gs.custom_credit_amount)), 0) AS revenue
+       FROM gifts_sent gs
+       LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
+       WHERE gs.payment_status = 'paid' AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $1`,
+      [merchantId]
+    );
+    const lifetimeCodes = await query(
+      `SELECT
+         COUNT(*) AS codes_issued,
+         COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE) AS unredeemed_codes
+       FROM gift_instances gi
+       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+       WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1`,
+      [merchantId]
+    );
+    result.lifetime = {
+      sales_revenue: parseFloat(lifetimeSales.rows[0].revenue) || 0,
+      codes_issued: parseInt(lifetimeCodes.rows[0].codes_issued, 10) || 0,
+      unredeemed_codes: parseInt(lifetimeCodes.rows[0].unredeemed_codes, 10) || 0,
     };
   }
 
