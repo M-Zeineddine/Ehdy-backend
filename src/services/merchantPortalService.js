@@ -284,6 +284,25 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
 }
 
 /**
+ * Shared filter-clause builder for gifts_sent purchases — used by both the
+ * paginated list and the filter-scoped summary so they can never disagree
+ * about what a given set of filters means.
+ */
+function buildPurchasesClause({ date_from, date_to, type }) {
+  const conditions = [
+    `gs.payment_status = 'paid'`,
+    `COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $1`,
+  ];
+  const params = [];
+  let idx = 2;
+  if (date_from) { conditions.push(`gs.sent_at >= $${idx++}`); params.push(date_from); }
+  if (date_to)   { conditions.push(`gs.sent_at <= $${idx++}`); params.push(date_to); }
+  if (type === 'gift_item')    conditions.push('gs.merchant_item_id IS NOT NULL');
+  if (type === 'store_credit') conditions.push('gs.merchant_item_id IS NULL');
+  return { where: conditions.join(' AND '), extraParams: params };
+}
+
+/**
  * Purchase history for a merchant — one row per gift card sold (paid),
  * whether or not it's been redeemed yet. Not branch-scoped: a purchase
  * happens online, never at a specific branch.
@@ -293,18 +312,9 @@ async function getMerchantPurchases(merchantId, { page, limit, period, type } = 
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const { date_from, date_to } = getPeriodBounds(period);
 
-  const conditions = [
-    `gs.payment_status = 'paid'`,
-    `COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $1`,
-  ];
-  const params = [merchantId];
-  let idx = 2;
-  if (date_from) { conditions.push(`gs.sent_at >= $${idx++}`); params.push(date_from); }
-  if (date_to)   { conditions.push(`gs.sent_at <= $${idx++}`); params.push(date_to); }
-  if (type === 'gift_item')    conditions.push('gs.merchant_item_id IS NOT NULL');
-  if (type === 'store_credit') conditions.push('gs.merchant_item_id IS NULL');
-
-  const whereClause = conditions.join(' AND ');
+  const { where: whereClause, extraParams } = buildPurchasesClause({ date_from, date_to, type });
+  const params = [merchantId, ...extraParams];
+  let idx = params.length + 1;
   const joins = `LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
                  LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id`;
 
@@ -344,6 +354,31 @@ async function getMerchantPurchases(merchantId, { page, limit, period, type } = 
   return {
     purchases: result.rows,
     pagination: { total, page: pg, limit: lim, pages: Math.ceil(total / lim) },
+  };
+}
+
+/**
+ * Aggregate stats for the exact same filter set getMerchantPurchases accepts
+ * — reuses the same clause builder so the summary bar shown above a filtered
+ * list can never disagree with what's actually in that list.
+ */
+async function getMerchantPurchasesSummary(merchantId, { period, type } = {}) {
+  const { date_from, date_to } = getPeriodBounds(period);
+  const { where: whereClause, extraParams } = buildPurchasesClause({ date_from, date_to, type });
+  const params = [merchantId, ...extraParams];
+
+  const r = await query(
+    `SELECT
+       COUNT(*) AS count,
+       COALESCE(SUM(COALESCE(mi.price, gs.custom_credit_amount)), 0) AS revenue
+     FROM gifts_sent gs
+     LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
+     WHERE ${whereClause}`,
+    params
+  );
+  return {
+    count: parseInt(r.rows[0].count, 10) || 0,
+    revenue: parseFloat(r.rows[0].revenue) || 0,
   };
 }
 
@@ -700,6 +735,7 @@ module.exports = {
   merchantLogin,
   getMerchantDashboard,
   getMerchantPurchases,
+  getMerchantPurchasesSummary,
   listActiveCodes,
   listBranches,
   createBranch,

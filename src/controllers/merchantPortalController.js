@@ -57,6 +57,16 @@ const getPurchases = async (req, res, next) => {
   }
 };
 
+const getPurchasesSummary = async (req, res, next) => {
+  try {
+    const { period, type } = req.query;
+    const summary = await merchantPortalService.getMerchantPurchasesSummary(req.merchantId, { period, type });
+    return successResponse(res, { summary });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const getActiveCodes = async (req, res, next) => {
   try {
     const { page, limit, type } = req.query;
@@ -142,6 +152,30 @@ const getRedemptions = async (req, res, next) => {
       branchIds,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const getRedemptionsSummary = async (req, res, next) => {
+  try {
+    const { period, type, status, branch_id } = req.query;
+
+    let branchIds = req.branchIds;
+    if (branch_id) {
+      if (branchIds && !branchIds.includes(branch_id)) {
+        return next(new AppError('You do not have access to this branch.', 403, 'BRANCH_FORBIDDEN'));
+      }
+      branchIds = [branch_id];
+    }
+
+    const summary = await redemptionService.getMerchantRedemptionsSummary(req.merchantId, {
+      period,
+      type,
+      status,
+      branchIds,
+    });
+    return successResponse(res, { summary });
   } catch (err) {
     return next(err);
   }
@@ -270,7 +304,7 @@ const uploadImage = async (req, res, next) => {
 
 module.exports = {
   login, getMe, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp,
-  confirmRedemption, getRedemptions, getPurchases, getActiveCodes,
+  confirmRedemption, getRedemptions, getRedemptionsSummary, getPurchases, getPurchasesSummary, getActiveCodes,
   listBranches, createBranch, updateBranch,
   listItems, createItem, updateItem,
   listStaff, createStaff, updateStaff,

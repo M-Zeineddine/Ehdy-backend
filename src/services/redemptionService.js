@@ -344,6 +344,39 @@ async function performRedemption(redemptionCode, merchantId, { amount_to_redeem,
 }
 
 /**
+ * Shared filter-clause builders for redemption_events/redemption_attempts —
+ * used by both the paginated list and the filter-scoped summary so the two
+ * can never disagree about what a given set of filters means. `params` is
+ * mutated in place (pushed to) starting at `$${startIdx}`; the caller passes
+ * either one shared array (continuing the index across both clauses, for a
+ * single combined query) or a fresh array per clause (for separate queries).
+ */
+function buildEventsClause(params, startIdx, { date_from, date_to, branchIds, type, status }) {
+  const conditions = ['re.merchant_id = $1'];
+  let idx = startIdx;
+  if (date_from) { conditions.push(`re.redeemed_at >= $${idx}`); params.push(date_from); idx++; }
+  if (date_to)   { conditions.push(`re.redeemed_at <= $${idx}`); params.push(date_to); idx++; }
+  if (branchIds) { conditions.push(`re.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
+  if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
+  if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
+  // Items are always one-shot (no balance) — only a store-credit event
+  // whose balance_after hit 0 counts as "completed"; anything else with
+  // money left is "partial". Derived from data already on the row.
+  if (status === 'completed') conditions.push('(gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0)');
+  if (status === 'partial')   conditions.push('(gi.merchant_item_id IS NULL AND re.balance_after > 0)');
+  return { where: conditions.join(' AND '), idx };
+}
+
+function buildAttemptsClause(params, startIdx, { date_from, date_to, branchIds }) {
+  const conditions = ['ra.merchant_id = $1'];
+  let idx = startIdx;
+  if (date_from) { conditions.push(`ra.attempted_at >= $${idx}`); params.push(date_from); idx++; }
+  if (date_to)   { conditions.push(`ra.attempted_at <= $${idx}`); params.push(date_to); idx++; }
+  if (branchIds) { conditions.push(`ra.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
+  return { where: conditions.join(' AND '), idx };
+}
+
+/**
  * Get redemption history for a merchant — a merged feed of two sources:
  *   - redemption_events: one row per actual successful transaction. Never
  *     read gift_instances.redeemed_at/redeemed_amount for this — those only
@@ -374,17 +407,8 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
   const branches = [];
 
   if (includeEvents) {
-    const conditions = ['re.merchant_id = $1'];
-    if (date_from) { conditions.push(`re.redeemed_at >= $${idx}`); params.push(date_from); idx++; }
-    if (date_to)   { conditions.push(`re.redeemed_at <= $${idx}`); params.push(date_to); idx++; }
-    if (branchIds) { conditions.push(`re.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
-    if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
-    if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
-    // Items are always one-shot (no balance) — only a store-credit event
-    // whose balance_after hit 0 counts as "completed"; anything else with
-    // money left is "partial". Derived from data already on the row.
-    if (status === 'completed') conditions.push('(gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0)');
-    if (status === 'partial')   conditions.push('(gi.merchant_item_id IS NULL AND re.balance_after > 0)');
+    const { where, idx: nextIdx } = buildEventsClause(params, idx, { date_from, date_to, branchIds, type, status });
+    idx = nextIdx;
 
     branches.push(`
       SELECT re.id, gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount,
@@ -408,15 +432,13 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
       LEFT JOIN merchant_items mi   ON mi.id = gi.merchant_item_id
       LEFT JOIN merchant_branches b ON b.id = re.branch_id
       LEFT JOIN gifts_sent gs       ON gs.id = gi.gift_sent_id
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${where}
     `);
   }
 
   if (includeAttempts) {
-    const conditions = ['ra.merchant_id = $1'];
-    if (date_from) { conditions.push(`ra.attempted_at >= $${idx}`); params.push(date_from); idx++; }
-    if (date_to)   { conditions.push(`ra.attempted_at <= $${idx}`); params.push(date_to); idx++; }
-    if (branchIds) { conditions.push(`ra.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
+    const { where, idx: nextIdx } = buildAttemptsClause(params, idx, { date_from, date_to, branchIds });
+    idx = nextIdx;
 
     branches.push(`
       SELECT ra.id, ra.attempted_code AS redemption_code, ra.attempted_at AS redeemed_at,
@@ -428,7 +450,7 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
              ra.error_code, ra.error_message
       FROM redemption_attempts ra
       LEFT JOIN merchant_branches b ON b.id = ra.branch_id
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${where}
     `);
   }
 
@@ -446,6 +468,57 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
   return {
     redemptions: result.rows,
     pagination: { total, page: pg, limit: lim, pages: Math.ceil(total / lim) },
+  };
+}
+
+/**
+ * Aggregate stats for the exact same filter set getMerchantRedemptions
+ * accepts — reuses the same clause builders so the summary bar shown above
+ * a filtered list can never disagree with what's actually in that list.
+ * Revenue only ever comes from events (attempts never touched any money).
+ */
+async function getMerchantRedemptionsSummary(merchantId, { period, type, status, branchIds = null }) {
+  const { date_from, date_to } = getPeriodBounds(period);
+  const includeEvents = status !== 'failed';
+  const includeAttempts = status !== 'partial' && status !== 'completed';
+
+  let completedCount = 0;
+  let partialCount = 0;
+  let revenue = 0;
+  let failedCount = 0;
+
+  if (includeEvents) {
+    const params = [merchantId];
+    const { where } = buildEventsClause(params, 2, { date_from, date_to, branchIds, type, status });
+    const r = await query(
+      `SELECT
+         COALESCE(SUM(re.amount), 0) AS revenue,
+         COUNT(*) FILTER (WHERE gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0) AS completed_count,
+         COUNT(*) FILTER (WHERE gi.merchant_item_id IS NULL AND re.balance_after > 0) AS partial_count
+       FROM redemption_events re
+       JOIN gift_instances gi ON gi.id = re.gift_instance_id
+       WHERE ${where}`,
+      params
+    );
+    const row = r.rows[0];
+    revenue = parseFloat(row.revenue) || 0;
+    completedCount = parseInt(row.completed_count, 10) || 0;
+    partialCount = parseInt(row.partial_count, 10) || 0;
+  }
+
+  if (includeAttempts) {
+    const params = [merchantId];
+    const { where } = buildAttemptsClause(params, 2, { date_from, date_to, branchIds });
+    const r = await query(`SELECT COUNT(*) AS count FROM redemption_attempts ra WHERE ${where}`, params);
+    failedCount = parseInt(r.rows[0].count, 10) || 0;
+  }
+
+  return {
+    count: completedCount + partialCount + failedCount,
+    revenue,
+    completed_count: completedCount,
+    partial_count: partialCount,
+    failed_count: failedCount,
   };
 }
 
@@ -531,4 +604,7 @@ async function verifyRedemptionOtp(redemptionCode, code) {
   logger.info(`Redemption OTP verified for code ${redemptionCode}`);
 }
 
-module.exports = { validateRedemptionCode, sendRedemptionOtp, verifyRedemptionOtp, confirmRedemption, getMerchantRedemptions };
+module.exports = {
+  validateRedemptionCode, sendRedemptionOtp, verifyRedemptionOtp, confirmRedemption,
+  getMerchantRedemptions, getMerchantRedemptionsSummary,
+};

@@ -158,7 +158,9 @@ router.post(
   merchantPortalController.confirmRedemption
 );
 router.get('/redemptions', requireMerchantRole('owner', 'manager'), paginationValidation, branchFilterValidation, validate, merchantPortalController.getRedemptions);
+router.get('/redemptions/summary', requireMerchantRole('owner', 'manager'), branchFilterValidation, validate, merchantPortalController.getRedemptionsSummary);
 router.get('/purchases', requireOwnerRole, paginationValidation, validate, merchantPortalController.getPurchases);
+router.get('/purchases/summary', requireOwnerRole, merchantPortalController.getPurchasesSummary);
 router.get('/active-codes', requireMerchantRole('owner', 'manager'), paginationValidation, validate, merchantPortalController.getActiveCodes);
 
 // ─── Branches (list: any portal role — needed for the redemption branch picker) ─
