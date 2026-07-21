@@ -273,6 +273,11 @@ const uuidParamValidation = (paramName = 'id') => [
   param(paramName).isUUID().withMessage(`Invalid ${paramName}`),
 ];
 
+// Optional single-branch narrowing filter (e.g. GET /merchant/redemptions?branch_id=...)
+const branchFilterValidation = [
+  query('branch_id').optional().isUUID().withMessage('Invalid branch_id'),
+];
+
 module.exports = {
   signupValidation,
   signinValidation,
@@ -304,4 +309,5 @@ module.exports = {
   staffUpdateValidation,
   paginationValidation,
   uuidParamValidation,
+  branchFilterValidation,
 };
