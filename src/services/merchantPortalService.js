@@ -85,132 +85,180 @@ async function merchantLogin({ email, password }) {
 
 /**
  * Get dashboard stats for the merchant portal.
- * branchIds: null = merchant-wide (owners / unscoped users); an array limits
- * redemption stats to events recorded at those branches. Branch-scoped stats
- * are computed from redemption_events, since that is where the branch is
- * recorded; active_codes stays merchant-wide because unredeemed codes are not
- * bound to a branch.
+ *
+ * Redemption stats always read from redemption_events (one row per actual
+ * transaction) — never from gift_instances.redeemed_at/redeemed_amount,
+ * which only update when a card becomes FULLY redeemed and otherwise hide
+ * every partial redemption from these numbers entirely.
+ *
+ * branchIds: null = merchant-wide (owners, or managers with no branch
+ * assignment); an array limits redemption stats to that branch. active_codes
+ * stays merchant-wide because unredeemed codes aren't bound to a branch.
+ *
+ * Sales (purchase) stats are merchant-wide by nature — a purchase happens
+ * online, not at a branch — so they're only included for owners; a branch
+ * manager seeing company-wide sales figures would be confusing.
  */
-async function getMerchantDashboard(merchantId, branchIds = null) {
+async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner') {
   const today = new Date().toISOString().split('T')[0];
   const startOfDay = `${today} 00:00:00`;
   const endOfDay = `${today} 23:59:59`;
 
+  const redemptionParams = [startOfDay, endOfDay, merchantId];
+  let branchFilter = '';
   if (branchIds) {
-    const stats = await query(
+    branchFilter = `AND re.branch_id = ANY($${redemptionParams.length + 1})`;
+    redemptionParams.push(branchIds);
+  }
+
+  const redemptionStats = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_redemptions,
+       SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_revenue,
+       COUNT(*) FILTER (WHERE DATE_TRUNC('month', re.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_redemptions,
+       SUM(re.amount) FILTER (WHERE DATE_TRUNC('month', re.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_revenue
+     FROM redemption_events re
+     WHERE re.merchant_id = $3 ${branchFilter}`,
+    redemptionParams
+  );
+
+  const activeCodes = await query(
+    `SELECT COUNT(*) AS active_codes
+     FROM gift_instances gi
+     LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+     WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
+       AND gi.is_redeemed = FALSE
+       AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)`,
+    [merchantId]
+  );
+
+  const r = redemptionStats.rows[0];
+  const result = {
+    today: {
+      redemptions: parseInt(r.today_redemptions, 10) || 0,
+      revenue: parseFloat(r.today_revenue) || 0,
+    },
+    month: {
+      redemptions: parseInt(r.month_redemptions, 10) || 0,
+      revenue: parseFloat(r.month_revenue) || 0,
+    },
+    active_codes: parseInt(activeCodes.rows[0].active_codes, 10) || 0,
+    sales: null,
+  };
+
+  if (role === 'owner') {
+    const saleStats = await query(
       `SELECT
-         COUNT(*) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_redemptions,
-         SUM(re.amount) FILTER (WHERE re.redeemed_at BETWEEN $1 AND $2) AS today_revenue,
-         COUNT(*) FILTER (WHERE DATE_TRUNC('month', re.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_redemptions,
-         SUM(re.amount) FILTER (WHERE DATE_TRUNC('month', re.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_revenue
-       FROM redemption_events re
-       WHERE re.merchant_id = $3 AND re.branch_id = ANY($4)`,
-      [startOfDay, endOfDay, merchantId, branchIds]
+         COUNT(*) FILTER (WHERE gs.sent_at BETWEEN $1 AND $2) AS today_sold,
+         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE gs.sent_at BETWEEN $1 AND $2) AS today_revenue,
+         COUNT(*) FILTER (WHERE DATE_TRUNC('month', gs.sent_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_sold,
+         SUM(COALESCE(mi.price, gs.custom_credit_amount)) FILTER (WHERE DATE_TRUNC('month', gs.sent_at) = DATE_TRUNC('month', CURRENT_DATE)) AS month_revenue
+       FROM gifts_sent gs
+       LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
+       WHERE gs.payment_status = 'paid'
+         AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $3`,
+      [startOfDay, endOfDay, merchantId]
     );
-
-    const activeCodes = await query(
-      `SELECT COUNT(*) AS active_codes
-       FROM gift_instances gi
-       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-       WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
-         AND gi.is_redeemed = FALSE
-         AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)`,
-      [merchantId]
-    );
-
-    const recentRedemptions = await query(
-      `SELECT gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount, re.currency_code,
-              CASE
-                WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
-                ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
-              END AS gift_card_name,
-              CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type
-       FROM redemption_events re
-       JOIN gift_instances gi ON gi.id = re.gift_instance_id
-       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-       WHERE re.merchant_id = $1 AND re.branch_id = ANY($2)
-       ORDER BY re.redeemed_at DESC
-       LIMIT 10`,
-      [merchantId, branchIds]
-    );
-
-    const s = stats.rows[0];
-    return {
-      today: {
-        redemptions: parseInt(s.today_redemptions, 10) || 0,
-        revenue: parseFloat(s.today_revenue) || 0,
-      },
-      month: {
-        redemptions: parseInt(s.month_redemptions, 10) || 0,
-        revenue: parseFloat(s.month_revenue) || 0,
-      },
-      active_codes: parseInt(activeCodes.rows[0].active_codes, 10) || 0,
-      recent_redemptions: recentRedemptions.rows,
+    const s = saleStats.rows[0];
+    result.sales = {
+      today: { sold: parseInt(s.today_sold, 10) || 0, revenue: parseFloat(s.today_revenue) || 0 },
+      month: { sold: parseInt(s.month_sold, 10) || 0, revenue: parseFloat(s.month_revenue) || 0 },
     };
   }
 
-  const merchantFilter = `COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $3`;
-  const merchantJoins = `
-    LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-  `;
+  return result;
+}
 
-  // Today's stats
-  const todayStats = await query(
-    `SELECT
-       COUNT(*) FILTER (WHERE gi.redeemed_at BETWEEN $1 AND $2) AS today_redemptions,
-       SUM(gi.redeemed_amount) FILTER (WHERE gi.redeemed_at BETWEEN $1 AND $2) AS today_revenue,
-       COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE
-         AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)) AS active_codes
-     FROM gift_instances gi
-     ${merchantJoins}
-     WHERE ${merchantFilter}`,
-    [startOfDay, endOfDay, merchantId]
+/**
+ * Purchase history for a merchant — one row per gift card sold (paid),
+ * whether or not it's been redeemed yet. Not branch-scoped: a purchase
+ * happens online, never at a specific branch.
+ */
+async function getMerchantPurchases(merchantId, { page, limit, date_from, date_to } = {}) {
+  const { buildPagination } = require('../utils/database');
+  const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+
+  const conditions = [
+    `gs.payment_status = 'paid'`,
+    `COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $1`,
+  ];
+  const params = [merchantId];
+  let idx = 2;
+  if (date_from) { conditions.push(`gs.sent_at >= $${idx++}`); params.push(date_from); }
+  if (date_to)   { conditions.push(`gs.sent_at <= $${idx++}`); params.push(date_to); }
+
+  const whereClause = conditions.join(' AND ');
+  const joins = 'LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id';
+
+  const countResult = await query(
+    `SELECT COUNT(*) FROM gifts_sent gs ${joins} WHERE ${whereClause}`,
+    params
+  );
+  const total = parseInt(countResult.rows[0].count, 10);
+
+  params.push(lim, offset);
+
+  const result = await query(
+    `SELECT gs.id, gs.sent_at, gs.recipient_name,
+            COALESCE(mi.price, gs.custom_credit_amount)          AS amount,
+            COALESCE(mi.currency_code, gs.custom_credit_currency) AS currency_code,
+            CASE WHEN gs.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
+            CASE
+              WHEN gs.merchant_item_id IS NOT NULL THEN mi.name
+              ELSE CONCAT(gs.custom_credit_amount::text, ' ', gs.custom_credit_currency, ' Store Credit')
+            END AS gift_card_name
+     FROM gifts_sent gs
+     ${joins}
+     WHERE ${whereClause}
+     ORDER BY gs.sent_at DESC
+     LIMIT $${idx++} OFFSET $${idx++}`,
+    params
   );
 
-  // This month stats
-  const monthStats = await query(
-    `SELECT
-       COUNT(*) AS month_redemptions,
-       SUM(gi.redeemed_amount) AS month_revenue
-     FROM gift_instances gi
-     ${merchantJoins}
-     WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
-       AND gi.is_redeemed = TRUE
-       AND DATE_TRUNC('month', gi.redeemed_at) = DATE_TRUNC('month', CURRENT_DATE)`,
+  return {
+    purchases: result.rows,
+    pagination: { total, page: pg, limit: lim, pages: Math.ceil(total / lim) },
+  };
+}
+
+/**
+ * Currently active (unredeemed, unexpired) gift codes for a merchant —
+ * merchant-wide, since a code isn't tied to any branch until redeemed.
+ */
+async function listActiveCodes(merchantId, { page, limit } = {}) {
+  const { buildPagination } = require('../utils/database');
+  const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+
+  const whereClause = `COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
+     AND gi.is_redeemed = FALSE
+     AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)`;
+  const joins = 'LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id';
+
+  const countResult = await query(
+    `SELECT COUNT(*) FROM gift_instances gi ${joins} WHERE ${whereClause}`,
     [merchantId]
   );
+  const total = parseInt(countResult.rows[0].count, 10);
 
-  // Recent redemptions
-  const recentRedemptions = await query(
-    `SELECT gi.redemption_code, gi.redeemed_at, gi.redeemed_amount, gi.currency_code,
+  const result = await query(
+    `SELECT gi.id, gi.redemption_code, gi.current_balance, gi.initial_balance,
+            gi.currency_code, gi.expiration_date, gi.created_at,
+            CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
             CASE
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
               ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
-            END AS gift_card_name,
-            CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type
+            END AS gift_card_name
      FROM gift_instances gi
-     ${merchantJoins}
-     WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
-       AND gi.is_redeemed = TRUE
-     ORDER BY gi.redeemed_at DESC
-     LIMIT 10`,
-    [merchantId]
+     ${joins}
+     WHERE ${whereClause}
+     ORDER BY gi.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [merchantId, lim, offset]
   );
 
-  const stats = todayStats.rows[0];
-  const month = monthStats.rows[0];
-
   return {
-    today: {
-      redemptions: parseInt(stats.today_redemptions, 10) || 0,
-      revenue: parseFloat(stats.today_revenue) || 0,
-    },
-    month: {
-      redemptions: parseInt(month.month_redemptions, 10) || 0,
-      revenue: parseFloat(month.month_revenue) || 0,
-    },
-    active_codes: parseInt(stats.active_codes, 10) || 0,
-    recent_redemptions: recentRedemptions.rows,
+    codes: result.rows,
+    pagination: { total, page: pg, limit: lim, pages: Math.ceil(total / lim) },
   };
 }
 
@@ -520,6 +568,8 @@ async function updateProfile(merchantId, data) {
 module.exports = {
   merchantLogin,
   getMerchantDashboard,
+  getMerchantPurchases,
+  listActiveCodes,
   listBranches,
   createBranch,
   updateBranch,

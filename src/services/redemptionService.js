@@ -306,28 +306,29 @@ async function confirmRedemption(redemptionCode, merchantId, { amount_to_redeem,
 }
 
 /**
- * Get redemption history for a merchant.
+ * Get redemption history for a merchant — one row per actual redemption
+ * transaction (redemption_events), not per gift card. gift_instances only
+ * tracks current state: redeemed_at/redeemed_amount there only update once a
+ * card becomes FULLY redeemed, so a partially-redeemed card would otherwise
+ * be invisible (or merged into one row with a lifetime-cumulative amount)
+ * even though each partial redemption is a separate real transaction.
  */
 async function getMerchantRedemptions(merchantId, { page, limit, date_from, date_to, branchIds = null }) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
 
-  const conditions = ['gi.redeemed_by_merchant_id = $1'];
+  const conditions = ['re.merchant_id = $1'];
   const params = [merchantId];
   let idx = 2;
 
-  if (date_from) { conditions.push(`gi.redeemed_at >= $${idx++}`); params.push(date_from); }
-  if (date_to)   { conditions.push(`gi.redeemed_at <= $${idx++}`); params.push(date_to); }
-  if (branchIds) {
-    conditions.push(`EXISTS (SELECT 1 FROM redemption_events re
-                             WHERE re.gift_instance_id = gi.id AND re.branch_id = ANY($${idx++}))`);
-    params.push(branchIds);
-  }
+  if (date_from) { conditions.push(`re.redeemed_at >= $${idx++}`); params.push(date_from); }
+  if (date_to)   { conditions.push(`re.redeemed_at <= $${idx++}`); params.push(date_to); }
+  if (branchIds) { conditions.push(`re.branch_id = ANY($${idx++})`); params.push(branchIds); }
 
   const whereClause = conditions.join(' AND ');
 
   const countResult = await query(
-    `SELECT COUNT(*) FROM gift_instances gi WHERE ${whereClause}`,
+    `SELECT COUNT(*) FROM redemption_events re WHERE ${whereClause}`,
     params
   );
   const total = parseInt(countResult.rows[0].count, 10);
@@ -335,17 +336,19 @@ async function getMerchantRedemptions(merchantId, { page, limit, date_from, date
   params.push(lim, offset);
 
   const result = await query(
-    `SELECT gi.id, gi.redemption_code, gi.redeemed_at, gi.redeemed_amount,
-            gi.currency_code,
+    `SELECT re.id, gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount,
+            re.currency_code, b.name AS branch_name,
             CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
             CASE
               WHEN gi.merchant_item_id IS NOT NULL THEN mi.name
               ELSE CONCAT(gi.initial_balance::text, ' ', gi.currency_code, ' Store Credit')
             END AS gift_card_name
-     FROM gift_instances gi
-     LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+     FROM redemption_events re
+     JOIN gift_instances gi        ON gi.id = re.gift_instance_id
+     LEFT JOIN merchant_items mi   ON mi.id = gi.merchant_item_id
+     LEFT JOIN merchant_branches b ON b.id = re.branch_id
      WHERE ${whereClause}
-     ORDER BY gi.redeemed_at DESC
+     ORDER BY re.redeemed_at DESC
      LIMIT $${idx++} OFFSET $${idx++}`,
     params
   );

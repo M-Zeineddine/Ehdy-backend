@@ -40,8 +40,28 @@ const getMe = async (req, res, next) => {
 
 const getDashboard = async (req, res, next) => {
   try {
-    const dashboard = await merchantPortalService.getMerchantDashboard(req.merchantId, req.branchIds);
+    const dashboard = await merchantPortalService.getMerchantDashboard(req.merchantId, req.branchIds, req.merchant.role);
     return successResponse(res, { dashboard });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const getPurchases = async (req, res, next) => {
+  try {
+    const { page, limit, date_from, date_to } = req.query;
+    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, date_from, date_to });
+    return paginatedResponse(res, result.purchases, result.pagination);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const getActiveCodes = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query;
+    const result = await merchantPortalService.listActiveCodes(req.merchantId, { page, limit });
+    return paginatedResponse(res, result.codes, result.pagination);
   } catch (err) {
     return next(err);
   }
@@ -237,7 +257,7 @@ const uploadImage = async (req, res, next) => {
 
 module.exports = {
   login, getMe, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp,
-  confirmRedemption, getRedemptions,
+  confirmRedemption, getRedemptions, getPurchases, getActiveCodes,
   listBranches, createBranch, updateBranch,
   listItems, createItem, updateItem,
   listStaff, createStaff, updateStaff,
