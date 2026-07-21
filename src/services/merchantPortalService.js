@@ -191,7 +191,8 @@ async function getMerchantPurchases(merchantId, { page, limit, period, type } = 
   if (type === 'store_credit') conditions.push('gs.merchant_item_id IS NULL');
 
   const whereClause = conditions.join(' AND ');
-  const joins = 'LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id';
+  const joins = `LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
+                 LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id`;
 
   const countResult = await query(
     `SELECT COUNT(*) FROM gifts_sent gs ${joins} WHERE ${whereClause}`,
@@ -210,7 +211,14 @@ async function getMerchantPurchases(merchantId, { page, limit, period, type } = 
               WHEN gs.merchant_item_id IS NOT NULL THEN mi.name
               ELSE CONCAT(gs.custom_credit_amount::text, ' ', gs.custom_credit_currency, ' Store Credit')
             END AS gift_card_name,
-            mi.description AS item_description, mi.image_url AS item_image
+            mi.description AS item_description, mi.image_url AS item_image,
+            gi.is_redeemed, gi.current_balance, gi.initial_balance,
+            CASE
+              WHEN gi.is_redeemed = TRUE THEN 'redeemed'
+              WHEN gi.current_balance IS NOT NULL AND gi.initial_balance IS NOT NULL
+                   AND gi.current_balance < gi.initial_balance THEN 'partially_redeemed'
+              ELSE 'active'
+            END AS redemption_status
      FROM gifts_sent gs
      ${joins}
      WHERE ${whereClause}

@@ -389,6 +389,7 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
     branches.push(`
       SELECT re.id, gi.redemption_code, re.redeemed_at, re.amount AS redeemed_amount,
              re.currency_code, b.name AS branch_name, re.notes,
+             re.balance_after AS remaining_balance, gi.initial_balance,
              CASE WHEN gi.merchant_item_id IS NOT NULL THEN 'gift_item' ELSE 'store_credit' END AS type,
              CASE
                WHEN gi.merchant_item_id IS NOT NULL THEN 'completed'
@@ -420,7 +421,8 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
     branches.push(`
       SELECT ra.id, ra.attempted_code AS redemption_code, ra.attempted_at AS redeemed_at,
              NULL::numeric AS redeemed_amount, NULL::text AS currency_code, b.name AS branch_name,
-             NULL::text AS notes, NULL::text AS type, 'failed' AS status, NULL::text AS gift_card_name,
+             NULL::text AS notes, NULL::numeric AS remaining_balance, NULL::numeric AS initial_balance,
+             NULL::text AS type, 'failed' AS status, NULL::text AS gift_card_name,
              NULL::text AS item_description, NULL::text AS item_image,
              NULL::text AS sender_name, NULL::text AS recipient_name, NULL::text AS recipient_phone,
              ra.error_code, ra.error_message
