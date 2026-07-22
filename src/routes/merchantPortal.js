@@ -162,6 +162,7 @@ router.get('/redemptions/summary', requireMerchantRole('owner', 'manager'), bran
 router.get('/purchases', requireOwnerRole, paginationValidation, validate, merchantPortalController.getPurchases);
 router.get('/purchases/summary', requireOwnerRole, merchantPortalController.getPurchasesSummary);
 router.get('/active-codes', requireMerchantRole('owner', 'manager'), paginationValidation, validate, merchantPortalController.getActiveCodes);
+router.get('/active-codes/summary', requireMerchantRole('owner', 'manager'), merchantPortalController.getActiveCodesSummary);
 
 // ─── Branches (list: any portal role — needed for the redemption branch picker) ─
 router.get('/branches', merchantPortalController.listBranches);

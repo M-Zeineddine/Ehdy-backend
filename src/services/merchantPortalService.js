@@ -93,14 +93,18 @@ async function merchantLogin({ email, password }) {
  * every partial redemption from these numbers entirely.
  *
  * branchIds: null = merchant-wide (owners, or managers with no branch
- * assignment); an array limits redemption stats to that branch. active_codes,
- * outstanding_balance, and lifetime stats stay merchant-wide — none of those
- * are bound to a branch.
+ * assignment); an array limits redemption stats to that branch.
  *
- * Sales (purchase) stats, best_seller, branch_breakdown, and lifetime are
- * only included for owners — company-wide financials a branch manager has
- * no operational reason to see (and, for branch_breakdown, would otherwise
+ * Sales (purchase) stats, best_seller, and branch_breakdown are only
+ * included for owners — company-wide financials a branch manager has no
+ * operational reason to see (and, for branch_breakdown, would otherwise
  * reveal other branches' performance to a manager scoped to just one).
+ *
+ * All-time ("lifetime") totals — total sales, total redeemed, unredeemed —
+ * are deliberately NOT computed here. They're just what the redemption/
+ * purchase/active-codes summary endpoints already return with no period
+ * filter, so the app fetches those directly instead of this duplicating
+ * the same aggregates under a different name.
  */
 async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner') {
   const today = getPeriodBounds('today');
@@ -136,26 +140,6 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
     redemptionParams
   );
 
-  const activeCodes = await query(
-    `SELECT COUNT(*) AS active_codes
-     FROM gift_instances gi
-     LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-     WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1
-       AND gi.is_redeemed = FALSE
-       AND (gi.expiration_date IS NULL OR gi.expiration_date >= CURRENT_DATE)`,
-    [merchantId]
-  );
-
-  // Outstanding balance: unredeemed store credit still in circulation — a
-  // liability figure, not tied to any branch (a customer can redeem it
-  // anywhere the merchant allows).
-  const outstanding = await query(
-    `SELECT COALESCE(SUM(gi.current_balance), 0) AS outstanding
-     FROM gift_instances gi
-     WHERE gi.custom_credit_merchant_id = $1 AND gi.is_redeemed = FALSE`,
-    [merchantId]
-  );
-
   const failedToday = await query(
     `SELECT COUNT(*) AS failed_today
      FROM redemption_attempts ra
@@ -181,13 +165,10 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
       redemptions: parseInt(r.last_month_redemptions, 10) || 0,
       revenue: parseFloat(r.last_month_revenue) || 0,
     },
-    active_codes: parseInt(activeCodes.rows[0].active_codes, 10) || 0,
-    outstanding_balance: parseFloat(outstanding.rows[0].outstanding) || 0,
     failed_attempts_today: parseInt(failedToday.rows[0].failed_today, 10) || 0,
     sales: null,
     best_seller: null,
     branch_breakdown: null,
-    lifetime: null,
   };
 
   if (role === 'owner') {
@@ -256,28 +237,6 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
         redemptions: parseInt(row.redemptions, 10),
       }));
     }
-
-    const lifetimeSales = await query(
-      `SELECT COALESCE(SUM(COALESCE(mi.price, gs.custom_credit_amount)), 0) AS revenue
-       FROM gifts_sent gs
-       LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
-       WHERE gs.payment_status = 'paid' AND COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $1`,
-      [merchantId]
-    );
-    const lifetimeCodes = await query(
-      `SELECT
-         COUNT(*) AS codes_issued,
-         COUNT(*) FILTER (WHERE gi.is_redeemed = FALSE) AS unredeemed_codes
-       FROM gift_instances gi
-       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
-       WHERE COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1`,
-      [merchantId]
-    );
-    result.lifetime = {
-      sales_revenue: parseFloat(lifetimeSales.rows[0].revenue) || 0,
-      codes_issued: parseInt(lifetimeCodes.rows[0].codes_issued, 10) || 0,
-      unredeemed_codes: parseInt(lifetimeCodes.rows[0].unredeemed_codes, 10) || 0,
-    };
   }
 
   return result;
@@ -383,13 +342,11 @@ async function getMerchantPurchasesSummary(merchantId, { period, type } = {}) {
 }
 
 /**
- * Currently active (unredeemed, unexpired) gift codes for a merchant —
- * merchant-wide, since a code isn't tied to any branch until redeemed.
+ * Shared filter-clause builder for currently-active (unredeemed, unexpired)
+ * gift codes — used by both the list and the summary so they can never
+ * disagree about what "active" means for a given type filter.
  */
-async function listActiveCodes(merchantId, { page, limit, type } = {}) {
-  const { buildPagination } = require('../utils/database');
-  const { offset, limit: lim, page: pg } = buildPagination(page, limit);
-
+function buildActiveCodesClause({ type }) {
   const conditions = [
     `COALESCE(mi.merchant_id, gi.custom_credit_merchant_id) = $1`,
     'gi.is_redeemed = FALSE',
@@ -397,7 +354,18 @@ async function listActiveCodes(merchantId, { page, limit, type } = {}) {
   ];
   if (type === 'gift_item')    conditions.push('gi.merchant_item_id IS NOT NULL');
   if (type === 'store_credit') conditions.push('gi.merchant_item_id IS NULL');
-  const whereClause = conditions.join(' AND ');
+  return conditions.join(' AND ');
+}
+
+/**
+ * Currently active (unredeemed, unexpired) gift codes for a merchant —
+ * merchant-wide, since a code isn't tied to any branch until redeemed.
+ */
+async function listActiveCodes(merchantId, { page, limit, type } = {}) {
+  const { buildPagination } = require('../utils/database');
+  const { offset, limit: lim, page: pg } = buildPagination(page, limit);
+
+  const whereClause = buildActiveCodesClause({ type });
   const joins = 'LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id';
 
   const countResult = await query(
@@ -425,6 +393,26 @@ async function listActiveCodes(merchantId, { page, limit, type } = {}) {
   return {
     codes: result.rows,
     pagination: { total, page: pg, limit: lim, pages: Math.ceil(total / lim) },
+  };
+}
+
+/**
+ * Aggregate stats for the exact same filter set listActiveCodes accepts —
+ * count of active codes plus the $ value still redeemable (current_balance
+ * is NULL for gift items, so SUM naturally only totals store credit).
+ */
+async function getMerchantActiveCodesSummary(merchantId, { type } = {}) {
+  const whereClause = buildActiveCodesClause({ type });
+  const joins = 'LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id';
+
+  const r = await query(
+    `SELECT COUNT(*) AS count, COALESCE(SUM(gi.current_balance), 0) AS value
+     FROM gift_instances gi ${joins} WHERE ${whereClause}`,
+    [merchantId]
+  );
+  return {
+    count: parseInt(r.rows[0].count, 10) || 0,
+    value: parseFloat(r.rows[0].value) || 0,
   };
 }
 
@@ -737,6 +725,7 @@ module.exports = {
   getMerchantPurchases,
   getMerchantPurchasesSummary,
   listActiveCodes,
+  getMerchantActiveCodesSummary,
   listBranches,
   createBranch,
   updateBranch,

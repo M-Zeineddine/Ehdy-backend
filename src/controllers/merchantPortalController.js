@@ -77,6 +77,16 @@ const getActiveCodes = async (req, res, next) => {
   }
 };
 
+const getActiveCodesSummary = async (req, res, next) => {
+  try {
+    const { type } = req.query;
+    const summary = await merchantPortalService.getMerchantActiveCodesSummary(req.merchantId, { type });
+    return successResponse(res, { summary });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const validateRedemption = async (req, res, next) => {
   try {
     const { redemption_code } = req.body;
@@ -304,7 +314,8 @@ const uploadImage = async (req, res, next) => {
 
 module.exports = {
   login, getMe, getDashboard, validateRedemption, sendRedemptionOtp, verifyRedemptionOtp,
-  confirmRedemption, getRedemptions, getRedemptionsSummary, getPurchases, getPurchasesSummary, getActiveCodes,
+  confirmRedemption, getRedemptions, getRedemptionsSummary, getPurchases, getPurchasesSummary,
+  getActiveCodes, getActiveCodesSummary,
   listBranches, createBranch, updateBranch,
   listItems, createItem, updateItem,
   listStaff, createStaff, updateStaff,
