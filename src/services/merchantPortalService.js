@@ -398,15 +398,17 @@ async function listActiveCodes(merchantId, { page, limit, type } = {}) {
 
 /**
  * Aggregate stats for the exact same filter set listActiveCodes accepts —
- * count of active codes plus the $ value still redeemable (current_balance
- * is NULL for gift items, so SUM naturally only totals store credit).
+ * count of active codes plus their $ value. current_balance is NULL for
+ * gift items (nothing partial to track), so an "All types" total falls
+ * back to the item's price as its value-equivalent — otherwise every
+ * unclaimed item would silently contribute $0 to "unredeemed."
  */
 async function getMerchantActiveCodesSummary(merchantId, { type } = {}) {
   const whereClause = buildActiveCodesClause({ type });
   const joins = 'LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id';
 
   const r = await query(
-    `SELECT COUNT(*) AS count, COALESCE(SUM(gi.current_balance), 0) AS value
+    `SELECT COUNT(*) AS count, COALESCE(SUM(COALESCE(gi.current_balance, mi.price)), 0) AS value
      FROM gift_instances gi ${joins} WHERE ${whereClause}`,
     [merchantId]
   );

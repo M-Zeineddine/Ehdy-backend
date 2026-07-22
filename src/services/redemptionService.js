@@ -475,7 +475,13 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
  * Aggregate stats for the exact same filter set getMerchantRedemptions
  * accepts — reuses the same clause builders so the summary bar shown above
  * a filtered list can never disagree with what's actually in that list.
- * Revenue only ever comes from events (attempts never touched any money).
+ *
+ * Revenue counts store-credit amounts actually redeemed (re.amount) plus,
+ * for claimed gift items, the item's price as its value-equivalent — a claim
+ * never has a re.amount (see buildEventsClause), so without this an "All
+ * types" total would silently drop every item redemption's value. Row-level
+ * detail (getMerchantRedemptions) is unaffected — a single claimed item
+ * still shows as "Item — fully claimed", not a fabricated dollar amount.
  */
 async function getMerchantRedemptionsSummary(merchantId, { period, type, status, branchIds = null }) {
   const { date_from, date_to } = getPeriodBounds(period);
@@ -492,11 +498,12 @@ async function getMerchantRedemptionsSummary(merchantId, { period, type, status,
     const { where } = buildEventsClause(params, 2, { date_from, date_to, branchIds, type, status });
     const r = await query(
       `SELECT
-         COALESCE(SUM(re.amount), 0) AS revenue,
+         COALESCE(SUM(COALESCE(re.amount, mi.price)), 0) AS revenue,
          COUNT(*) FILTER (WHERE gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0) AS completed_count,
          COUNT(*) FILTER (WHERE gi.merchant_item_id IS NULL AND re.balance_after > 0) AS partial_count
        FROM redemption_events re
        JOIN gift_instances gi ON gi.id = re.gift_instance_id
+       LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
        WHERE ${where}`,
       params
     );
