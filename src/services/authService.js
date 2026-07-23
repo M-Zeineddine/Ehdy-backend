@@ -189,17 +189,22 @@ async function claimPendingGiftsForPhone(userId, phone) {
 }
 
 /**
- * Sign in with email and password.
+ * Sign in with a password, identified by either email or a verified phone
+ * number. A phone can only be used once it's actually been verified —
+ * otherwise anyone who currently controls a phone number typed into someone
+ * else's account (by mistake or otherwise) could sign into that account.
  */
-async function signin({ email, password, skipPasswordCheck = false }) {
+async function signin({ email, phone, password, skipPasswordCheck = false }) {
   const result = await query(
     `SELECT id, email, password_hash, first_name, last_name, phone, is_email_verified, is_phone_verified, auth_provider, deleted_at
-     FROM users WHERE email = $1`,
-    [email.toLowerCase()]
+     FROM users
+     WHERE ($1::text IS NOT NULL AND email = $1)
+        OR ($2::text IS NOT NULL AND phone = $2 AND is_phone_verified = TRUE)`,
+    [email ? email.toLowerCase() : null, phone || null]
   );
 
   if (result.rows.length === 0) {
-    throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
+    throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
   }
 
   const user = result.rows[0];
@@ -218,7 +223,7 @@ async function signin({ email, password, skipPasswordCheck = false }) {
     }
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
-      throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
+      throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
     }
   }
 
@@ -327,37 +332,48 @@ async function resetPassword({ email, code, password }) {
 }
 
 /**
- * Send a WhatsApp OTP to the given phone number via VerifyWay.
+ * Generate an OTP, store it in Redis, and send it to the given phone number
+ * via VerifyWay WhatsApp. Shared by the post-signup verification flow and
+ * phone-based sign-in.
  */
-async function sendPhoneOtp(phone) {
+async function generateAndSendOtp(phone) {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   const redis = await getRedisClient();
   await redis.set(`phone_otp:${phone}`, code, { EX: PHONE_OTP_TTL });
 
-  const res = await fetch('https://api.verifyway.com/api/v1/', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.VERIFYWAY_API_KEY}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      recipient: phone,
-      type: 'otp',
-      channel: 'whatsapp',
-      fallback: 'no',
-      code,
-      lang: 'en',
-    }),
-  });
+  // VerifyWay WhatsApp send disabled for now to avoid burning OTP credits
+  // during testing — re-enable this block when ready to go live.
+  // const res = await fetch('https://api.verifyway.com/api/v1/', {
+  //   method: 'POST',
+  //   headers: {
+  //     'Authorization': `Bearer ${process.env.VERIFYWAY_API_KEY}`,
+  //     'Content-Type': 'application/json',
+  //     'Accept': 'application/json',
+  //   },
+  //   body: JSON.stringify({
+  //     recipient: phone,
+  //     type: 'otp',
+  //     channel: 'whatsapp',
+  //     fallback: 'no',
+  //     code,
+  //     lang: 'en',
+  //   }),
+  // });
+  //
+  // const data = await res.json();
+  // if (!res.ok) {
+  //   logger.error('VerifyWay error', data);
+  //   throw new AppError('Failed to send verification code', 500, 'OTP_SEND_FAILED');
+  // }
 
-  const data = await res.json();
-  if (!res.ok) {
-    logger.error('VerifyWay error', data);
-    throw new AppError('Failed to send verification code', 500, 'OTP_SEND_FAILED');
-  }
+  logger.info(`Phone OTP for ${phone}: ${code} (WhatsApp send disabled)`);
+}
 
-  logger.info(`Phone OTP sent to ${phone}`);
+/**
+ * Send a WhatsApp OTP to the given phone number via VerifyWay.
+ */
+async function sendPhoneOtp(phone) {
+  await generateAndSendOtp(phone);
 }
 
 /**

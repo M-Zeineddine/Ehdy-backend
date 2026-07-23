@@ -365,7 +365,7 @@ function buildEventsClause(params, startIdx, { date_from, date_to, branchIds, ty
   if (status === 'completed') conditions.push('(gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0)');
   if (status === 'partial')   conditions.push('(gi.merchant_item_id IS NULL AND re.balance_after > 0)');
   if (search) {
-    conditions.push(`(gi.redemption_code ILIKE $${idx} OR gs.sender_name ILIKE $${idx} OR gs.recipient_name ILIKE $${idx} OR gs.recipient_phone ILIKE $${idx})`);
+    conditions.push(`(gi.redemption_code ILIKE $${idx} OR gs.sender_name ILIKE $${idx} OR gs.recipient_name ILIKE $${idx} OR gs.recipient_phone ILIKE $${idx} OR mi.name ILIKE $${idx})`);
     params.push(`%${search}%`);
     idx++;
   }

@@ -28,8 +28,8 @@ const verifyEmail = async (req, res, next) => {
 
 const signin = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
-    const result = await authService.signin({ email, password });
+    const { email, phone, password } = req.body;
+    const result = await authService.signin({ email, phone, password });
     return successResponse(res, result, 'Signed in successfully.');
   } catch (err) {
     return next(err);

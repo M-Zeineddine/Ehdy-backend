@@ -17,8 +17,15 @@ const signupValidation = [
 ];
 
 const signinValidation = [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('phone').optional({ checkFalsy: true }).matches(/^\+?[0-9]{7,15}$/).withMessage('Valid phone number is required'),
   body('password').notEmpty().withMessage('Password is required'),
+  body().custom((value) => {
+    if (!value.email && !value.phone) {
+      throw new Error('Email or phone number is required');
+    }
+    return true;
+  }),
 ];
 
 const verifyEmailValidation = [

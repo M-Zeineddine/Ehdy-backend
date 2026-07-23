@@ -69,7 +69,7 @@ router.post('/verify-email', authLimiter, verifyEmailValidation, validate, authC
  * /auth/signin:
  *   post:
  *     tags: [Auth]
- *     summary: Sign in with email and password
+ *     summary: Sign in with email or verified phone number, and password
  *     requestBody:
  *       required: true
  *       content:

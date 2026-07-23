@@ -270,7 +270,7 @@ function buildPurchasesClause({ date_from, date_to, type, search }) {
   if (type === 'gift_item')    conditions.push('gs.merchant_item_id IS NOT NULL');
   if (type === 'store_credit') conditions.push('gs.merchant_item_id IS NULL');
   if (search) {
-    conditions.push(`(gs.sender_name ILIKE $${idx} OR gs.recipient_name ILIKE $${idx} OR gs.recipient_phone ILIKE $${idx} OR gi.redemption_code ILIKE $${idx})`);
+    conditions.push(`(gs.sender_name ILIKE $${idx} OR gs.recipient_name ILIKE $${idx} OR gs.recipient_phone ILIKE $${idx} OR gi.redemption_code ILIKE $${idx} OR mi.name ILIKE $${idx})`);
     params.push(`%${search}%`);
     idx++;
   }
