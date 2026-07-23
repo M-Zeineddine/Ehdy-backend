@@ -21,9 +21,10 @@ const logger = require('../utils/logger');
 /**
  * Get sent gifts for a user.
  */
-async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
+async function getSentGifts(userId, { page, limit, sort_order = 'desc', sort_by = 'date' }) {
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const order = sort_order === 'asc' ? 'ASC' : 'DESC';
+  const orderColumn = sort_by === 'price' ? 'COALESCE(mi.price, gs.custom_credit_amount)' : 'gs.sent_at';
 
   const countResult = await query(
     `SELECT COUNT(*) FROM gifts_sent WHERE sender_user_id = $1 AND payment_status = 'paid'`,
@@ -50,7 +51,7 @@ async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
      LEFT JOIN merchants mi_m    ON mi_m.id = mi.merchant_id
      LEFT JOIN merchants cc_m    ON cc_m.id = gs.custom_credit_merchant_id
      WHERE gs.sender_user_id = $1 AND gs.payment_status = 'paid'
-     ORDER BY gs.sent_at ${order}
+     ORDER BY ${orderColumn} ${order}, gs.sent_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, lim, offset]
   );
@@ -64,9 +65,10 @@ async function getSentGifts(userId, { page, limit, sort_order = 'desc' }) {
 /**
  * Get received gifts for a user.
  */
-async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', redemption_status }) {
+async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', sort_by = 'date', redemption_status }) {
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const order = sort_order === 'asc' ? 'ASC' : 'DESC';
+  const orderColumn = sort_by === 'price' ? 'COALESCE(mi.price, gs.custom_credit_amount)' : 'gs.sent_at';
   const statusParam = redemption_status || null;
 
   // Inline CASE repeated in WHERE so we can filter on the computed status column
@@ -113,7 +115,7 @@ async function getReceivedGifts(userId, { page, limit, sort_order = 'desc', rede
      LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
      WHERE gs.recipient_user_id = $1 AND gs.payment_status = 'paid'
      ${statusFilter}
-     ORDER BY gs.sent_at ${order}
+     ORDER BY ${orderColumn} ${order}, gs.sent_at DESC
      LIMIT $3 OFFSET $4`,
     [userId, statusParam, lim, offset]
   );

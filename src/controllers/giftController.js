@@ -6,8 +6,8 @@ const { successResponse, paginatedResponse } = require('../utils/formatters');
 
 const getSentGifts = async (req, res, next) => {
   try {
-    const { page, limit, sort_order } = req.query;
-    const result = await giftService.getSentGifts(req.userId, { page, limit, sort_order });
+    const { page, limit, sort_order, sort_by } = req.query;
+    const result = await giftService.getSentGifts(req.userId, { page, limit, sort_order, sort_by });
     return paginatedResponse(res, result.gifts, result.pagination);
   } catch (err) {
     return next(err);
@@ -16,8 +16,8 @@ const getSentGifts = async (req, res, next) => {
 
 const getReceivedGifts = async (req, res, next) => {
   try {
-    const { page, limit, sort_order, redemption_status } = req.query;
-    const result = await giftService.getReceivedGifts(req.userId, { page, limit, sort_order, redemption_status });
+    const { page, limit, sort_order, sort_by, redemption_status } = req.query;
+    const result = await giftService.getReceivedGifts(req.userId, { page, limit, sort_order, sort_by, redemption_status });
     return paginatedResponse(res, result.gifts, result.pagination);
   } catch (err) {
     return next(err);
