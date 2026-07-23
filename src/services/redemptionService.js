@@ -351,7 +351,7 @@ async function performRedemption(redemptionCode, merchantId, { amount_to_redeem,
  * either one shared array (continuing the index across both clauses, for a
  * single combined query) or a fresh array per clause (for separate queries).
  */
-function buildEventsClause(params, startIdx, { date_from, date_to, branchIds, type, status }) {
+function buildEventsClause(params, startIdx, { date_from, date_to, branchIds, type, status, search }) {
   const conditions = ['re.merchant_id = $1'];
   let idx = startIdx;
   if (date_from) { conditions.push(`re.redeemed_at >= $${idx}`); params.push(date_from); idx++; }
@@ -364,15 +364,27 @@ function buildEventsClause(params, startIdx, { date_from, date_to, branchIds, ty
   // money left is "partial". Derived from data already on the row.
   if (status === 'completed') conditions.push('(gi.merchant_item_id IS NOT NULL OR re.balance_after <= 0)');
   if (status === 'partial')   conditions.push('(gi.merchant_item_id IS NULL AND re.balance_after > 0)');
+  if (search) {
+    conditions.push(`(gi.redemption_code ILIKE $${idx} OR gs.sender_name ILIKE $${idx} OR gs.recipient_name ILIKE $${idx} OR gs.recipient_phone ILIKE $${idx})`);
+    params.push(`%${search}%`);
+    idx++;
+  }
   return { where: conditions.join(' AND '), idx };
 }
 
-function buildAttemptsClause(params, startIdx, { date_from, date_to, branchIds }) {
+function buildAttemptsClause(params, startIdx, { date_from, date_to, branchIds, search }) {
   const conditions = ['ra.merchant_id = $1'];
   let idx = startIdx;
   if (date_from) { conditions.push(`ra.attempted_at >= $${idx}`); params.push(date_from); idx++; }
   if (date_to)   { conditions.push(`ra.attempted_at <= $${idx}`); params.push(date_to); idx++; }
   if (branchIds) { conditions.push(`ra.branch_id = ANY($${idx})`); params.push(branchIds); idx++; }
+  // Attempts never touched a gift instance, so a failed row's only
+  // searchable text is the raw code the staff member typed in.
+  if (search) {
+    conditions.push(`ra.attempted_code ILIKE $${idx}`);
+    params.push(`%${search}%`);
+    idx++;
+  }
   return { where: conditions.join(' AND '), idx };
 }
 
@@ -392,7 +404,7 @@ function buildAttemptsClause(params, startIdx, { date_from, date_to, branchIds }
  * filter (store_credit/gift_item) only ever applies to the events side —
  * attempts have no type, so they pass through regardless of that filter.
  */
-async function getMerchantRedemptions(merchantId, { page, limit, period, type, status, branchIds = null }) {
+async function getMerchantRedemptions(merchantId, { page, limit, period, type, status, branchIds = null, search }) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const { date_from, date_to } = getPeriodBounds(period);
@@ -407,7 +419,7 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
   const branches = [];
 
   if (includeEvents) {
-    const { where, idx: nextIdx } = buildEventsClause(params, idx, { date_from, date_to, branchIds, type, status });
+    const { where, idx: nextIdx } = buildEventsClause(params, idx, { date_from, date_to, branchIds, type, status, search });
     idx = nextIdx;
 
     branches.push(`
@@ -437,7 +449,7 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
   }
 
   if (includeAttempts) {
-    const { where, idx: nextIdx } = buildAttemptsClause(params, idx, { date_from, date_to, branchIds });
+    const { where, idx: nextIdx } = buildAttemptsClause(params, idx, { date_from, date_to, branchIds, search });
     idx = nextIdx;
 
     branches.push(`
@@ -483,7 +495,7 @@ async function getMerchantRedemptions(merchantId, { page, limit, period, type, s
  * detail (getMerchantRedemptions) is unaffected — a single claimed item
  * still shows as "Item — fully claimed", not a fabricated dollar amount.
  */
-async function getMerchantRedemptionsSummary(merchantId, { period, type, status, branchIds = null }) {
+async function getMerchantRedemptionsSummary(merchantId, { period, type, status, branchIds = null, search }) {
   const { date_from, date_to } = getPeriodBounds(period);
   const includeEvents = status !== 'failed';
   const includeAttempts = status !== 'partial' && status !== 'completed';
@@ -495,7 +507,7 @@ async function getMerchantRedemptionsSummary(merchantId, { period, type, status,
 
   if (includeEvents) {
     const params = [merchantId];
-    const { where } = buildEventsClause(params, 2, { date_from, date_to, branchIds, type, status });
+    const { where } = buildEventsClause(params, 2, { date_from, date_to, branchIds, type, status, search });
     const r = await query(
       `SELECT
          COALESCE(SUM(COALESCE(re.amount, mi.price)), 0) AS revenue,
@@ -504,6 +516,7 @@ async function getMerchantRedemptionsSummary(merchantId, { period, type, status,
        FROM redemption_events re
        JOIN gift_instances gi ON gi.id = re.gift_instance_id
        LEFT JOIN merchant_items mi ON mi.id = gi.merchant_item_id
+       LEFT JOIN gifts_sent gs ON gs.id = gi.gift_sent_id
        WHERE ${where}`,
       params
     );
@@ -515,7 +528,7 @@ async function getMerchantRedemptionsSummary(merchantId, { period, type, status,
 
   if (includeAttempts) {
     const params = [merchantId];
-    const { where } = buildAttemptsClause(params, 2, { date_from, date_to, branchIds });
+    const { where } = buildAttemptsClause(params, 2, { date_from, date_to, branchIds, search });
     const r = await query(`SELECT COUNT(*) AS count FROM redemption_attempts ra WHERE ${where}`, params);
     failedCount = parseInt(r.rows[0].count, 10) || 0;
   }

@@ -49,8 +49,8 @@ const getDashboard = async (req, res, next) => {
 
 const getPurchases = async (req, res, next) => {
   try {
-    const { page, limit, period, type } = req.query;
-    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, period, type });
+    const { page, limit, period, type, search } = req.query;
+    const result = await merchantPortalService.getMerchantPurchases(req.merchantId, { page, limit, period, type, search });
     return paginatedResponse(res, result.purchases, result.pagination);
   } catch (err) {
     return next(err);
@@ -59,8 +59,8 @@ const getPurchases = async (req, res, next) => {
 
 const getPurchasesSummary = async (req, res, next) => {
   try {
-    const { period, type } = req.query;
-    const summary = await merchantPortalService.getMerchantPurchasesSummary(req.merchantId, { period, type });
+    const { period, type, search } = req.query;
+    const summary = await merchantPortalService.getMerchantPurchasesSummary(req.merchantId, { period, type, search });
     return successResponse(res, { summary });
   } catch (err) {
     return next(err);
@@ -140,7 +140,7 @@ const confirmRedemption = async (req, res, next) => {
 
 const getRedemptions = async (req, res, next) => {
   try {
-    const { page, limit, period, type, status, branch_id } = req.query;
+    const { page, limit, period, type, status, branch_id, search } = req.query;
 
     // req.branchIds is the caller's permitted scope (null = all branches, an
     // owner). A requested branch_id can only narrow that scope, never widen
@@ -160,6 +160,7 @@ const getRedemptions = async (req, res, next) => {
       type,
       status,
       branchIds,
+      search,
     });
     return paginatedResponse(res, result.redemptions, result.pagination);
   } catch (err) {
@@ -169,7 +170,7 @@ const getRedemptions = async (req, res, next) => {
 
 const getRedemptionsSummary = async (req, res, next) => {
   try {
-    const { period, type, status, branch_id } = req.query;
+    const { period, type, status, branch_id, search } = req.query;
 
     let branchIds = req.branchIds;
     if (branch_id) {
@@ -184,6 +185,7 @@ const getRedemptionsSummary = async (req, res, next) => {
       type,
       status,
       branchIds,
+      search,
     });
     return successResponse(res, { summary });
   } catch (err) {
@@ -195,7 +197,7 @@ const getRedemptionsSummary = async (req, res, next) => {
 
 const listBranches = async (req, res, next) => {
   try {
-    const branches = await merchantPortalService.listBranches(req.merchantId);
+    const branches = await merchantPortalService.listBranches(req.merchantId, req.branchIds);
     return successResponse(res, { branches });
   } catch (err) { return next(err); }
 };

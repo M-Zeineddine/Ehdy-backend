@@ -6,6 +6,7 @@ const { query, withTransaction } = require('../utils/database');
 const { AppError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { getPeriodBounds } = require('../utils/period');
+const { computeTrend } = require('../utils/trend');
 
 /**
  * Merchant portal login.
@@ -148,22 +149,28 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
   );
 
   const r = redemptionStats.rows[0];
+  const todayRevenue = parseFloat(r.today_revenue) || 0;
+  const yesterdayRevenue = parseFloat(r.yesterday_revenue) || 0;
+  const monthRevenue = parseFloat(r.month_revenue) || 0;
+  const lastMonthRevenue = parseFloat(r.last_month_revenue) || 0;
   const result = {
     today: {
       redemptions: parseInt(r.today_redemptions, 10) || 0,
-      revenue: parseFloat(r.today_revenue) || 0,
+      revenue: todayRevenue,
+      trend: computeTrend(todayRevenue, yesterdayRevenue),
     },
     yesterday: {
       redemptions: parseInt(r.yesterday_redemptions, 10) || 0,
-      revenue: parseFloat(r.yesterday_revenue) || 0,
+      revenue: yesterdayRevenue,
     },
     month: {
       redemptions: parseInt(r.month_redemptions, 10) || 0,
-      revenue: parseFloat(r.month_revenue) || 0,
+      revenue: monthRevenue,
+      trend: computeTrend(monthRevenue, lastMonthRevenue),
     },
     last_month: {
       redemptions: parseInt(r.last_month_redemptions, 10) || 0,
-      revenue: parseFloat(r.last_month_revenue) || 0,
+      revenue: lastMonthRevenue,
     },
     failed_attempts_today: parseInt(failedToday.rows[0].failed_today, 10) || 0,
     sales: null,
@@ -196,11 +203,15 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
       saleParams
     );
     const s = saleStats.rows[0];
+    const todaySold = parseFloat(s.today_revenue) || 0;
+    const yesterdaySold = parseFloat(s.yesterday_revenue) || 0;
+    const monthSold = parseFloat(s.month_revenue) || 0;
+    const lastMonthSold = parseFloat(s.last_month_revenue) || 0;
     result.sales = {
-      today: { sold: parseInt(s.today_sold, 10) || 0, revenue: parseFloat(s.today_revenue) || 0 },
-      yesterday: { sold: parseInt(s.yesterday_sold, 10) || 0, revenue: parseFloat(s.yesterday_revenue) || 0 },
-      month: { sold: parseInt(s.month_sold, 10) || 0, revenue: parseFloat(s.month_revenue) || 0 },
-      last_month: { sold: parseInt(s.last_month_sold, 10) || 0, revenue: parseFloat(s.last_month_revenue) || 0 },
+      today: { sold: parseInt(s.today_sold, 10) || 0, revenue: todaySold, trend: computeTrend(todaySold, yesterdaySold) },
+      yesterday: { sold: parseInt(s.yesterday_sold, 10) || 0, revenue: yesterdaySold },
+      month: { sold: parseInt(s.month_sold, 10) || 0, revenue: monthSold, trend: computeTrend(monthSold, lastMonthSold) },
+      last_month: { sold: parseInt(s.last_month_sold, 10) || 0, revenue: lastMonthSold },
     };
 
     const bestSeller = await query(
@@ -247,7 +258,7 @@ async function getMerchantDashboard(merchantId, branchIds = null, role = 'owner'
  * paginated list and the filter-scoped summary so they can never disagree
  * about what a given set of filters means.
  */
-function buildPurchasesClause({ date_from, date_to, type }) {
+function buildPurchasesClause({ date_from, date_to, type, search }) {
   const conditions = [
     `gs.payment_status = 'paid'`,
     `COALESCE(mi.merchant_id, gs.custom_credit_merchant_id) = $1`,
@@ -258,6 +269,11 @@ function buildPurchasesClause({ date_from, date_to, type }) {
   if (date_to)   { conditions.push(`gs.sent_at <= $${idx++}`); params.push(date_to); }
   if (type === 'gift_item')    conditions.push('gs.merchant_item_id IS NOT NULL');
   if (type === 'store_credit') conditions.push('gs.merchant_item_id IS NULL');
+  if (search) {
+    conditions.push(`(gs.sender_name ILIKE $${idx} OR gs.recipient_name ILIKE $${idx} OR gs.recipient_phone ILIKE $${idx} OR gi.redemption_code ILIKE $${idx})`);
+    params.push(`%${search}%`);
+    idx++;
+  }
   return { where: conditions.join(' AND '), extraParams: params };
 }
 
@@ -266,12 +282,12 @@ function buildPurchasesClause({ date_from, date_to, type }) {
  * whether or not it's been redeemed yet. Not branch-scoped: a purchase
  * happens online, never at a specific branch.
  */
-async function getMerchantPurchases(merchantId, { page, limit, period, type } = {}) {
+async function getMerchantPurchases(merchantId, { page, limit, period, type, search } = {}) {
   const { buildPagination } = require('../utils/database');
   const { offset, limit: lim, page: pg } = buildPagination(page, limit);
   const { date_from, date_to } = getPeriodBounds(period);
 
-  const { where: whereClause, extraParams } = buildPurchasesClause({ date_from, date_to, type });
+  const { where: whereClause, extraParams } = buildPurchasesClause({ date_from, date_to, type, search });
   const params = [merchantId, ...extraParams];
   let idx = params.length + 1;
   const joins = `LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
@@ -321,9 +337,9 @@ async function getMerchantPurchases(merchantId, { page, limit, period, type } = 
  * — reuses the same clause builder so the summary bar shown above a filtered
  * list can never disagree with what's actually in that list.
  */
-async function getMerchantPurchasesSummary(merchantId, { period, type } = {}) {
+async function getMerchantPurchasesSummary(merchantId, { period, type, search } = {}) {
   const { date_from, date_to } = getPeriodBounds(period);
-  const { where: whereClause, extraParams } = buildPurchasesClause({ date_from, date_to, type });
+  const { where: whereClause, extraParams } = buildPurchasesClause({ date_from, date_to, type, search });
   const params = [merchantId, ...extraParams];
 
   const r = await query(
@@ -332,6 +348,7 @@ async function getMerchantPurchasesSummary(merchantId, { period, type } = {}) {
        COALESCE(SUM(COALESCE(mi.price, gs.custom_credit_amount)), 0) AS revenue
      FROM gifts_sent gs
      LEFT JOIN merchant_items mi ON mi.id = gs.merchant_item_id
+     LEFT JOIN gift_instances gi ON gi.gift_sent_id = gs.id
      WHERE ${whereClause}`,
     params
   );
@@ -420,11 +437,23 @@ async function getMerchantActiveCodesSummary(merchantId, { type } = {}) {
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 
-async function listBranches(merchantId) {
+/**
+ * branchIds: the caller's permitted scope (null = owner/unscoped, sees every
+ * branch). A scoped manager only ever gets their own assigned branches back
+ * — narrowing this here means callers (e.g. a branch-filter picker) never
+ * need to filter the full list down client-side themselves.
+ */
+async function listBranches(merchantId, branchIds = null) {
+  const params = [merchantId];
+  let where = 'merchant_id = $1';
+  if (branchIds) {
+    where += ' AND id = ANY($2)';
+    params.push(branchIds);
+  }
   const result = await query(
     `SELECT id, name, address, city, latitude, longitude, contact_phone, is_active, created_at
-     FROM merchant_branches WHERE merchant_id = $1 ORDER BY name`,
-    [merchantId]
+     FROM merchant_branches WHERE ${where} ORDER BY name`,
+    params
   );
   return result.rows;
 }
