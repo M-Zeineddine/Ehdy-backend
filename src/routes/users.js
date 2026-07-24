@@ -89,6 +89,4 @@ router.put('/me', updateUserValidation, validate, userController.updateMe);
 router.post('/change-password', changePasswordValidation, validate, userController.changePassword);
 router.delete('/me', userController.deleteMe);
 
-router.post('/me/avatar', userController.uploadAvatarMiddleware, userController.uploadAvatar);
-
 module.exports = router;

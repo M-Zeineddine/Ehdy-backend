@@ -12,7 +12,7 @@ const BCRYPT_ROUNDS = 12;
  */
 async function getUserById(userId) {
   const result = await query(
-    `SELECT id, email, phone, first_name, last_name, profile_picture_url,
+    `SELECT id, email, phone, first_name, last_name,
             country_code, currency_code, date_of_birth, language,
             is_email_verified, is_phone_verified, auth_provider,
             last_login_at, created_at, updated_at
@@ -35,7 +35,6 @@ async function updateUser(userId, updates) {
     'first_name',
     'last_name',
     'phone',
-    'profile_picture_url',
     'country_code',
     'currency_code',
     'date_of_birth',
@@ -73,7 +72,7 @@ async function updateUser(userId, updates) {
   try {
     result = await query(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} AND deleted_at IS NULL
-       RETURNING id, email, phone, first_name, last_name, profile_picture_url,
+       RETURNING id, email, phone, first_name, last_name,
                  country_code, currency_code, date_of_birth, language,
                  is_email_verified, is_phone_verified, updated_at`,
       values

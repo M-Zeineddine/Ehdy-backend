@@ -133,7 +133,7 @@ const updateUserValidation = [
     .withMessage('Invalid phone number'),
   body('country_code').optional().isLength({ min: 2, max: 2 }),
   body('language').optional().isLength({ max: 10 }),
-  body('date_of_birth').optional().isDate().withMessage('Invalid date of birth'),
+  body('date_of_birth').optional({ nullable: true }).isDate().withMessage('Invalid date of birth'),
 ];
 
 const changePasswordValidation = [
