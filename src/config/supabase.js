@@ -24,5 +24,6 @@ function getStorage() {
 }
 
 const MERCHANT_ASSETS_BUCKET = 'merchant-assets';
+const USER_ASSETS_BUCKET = 'user-assets';
 
-module.exports = { getStorage, MERCHANT_ASSETS_BUCKET };
+module.exports = { getStorage, MERCHANT_ASSETS_BUCKET, USER_ASSETS_BUCKET };

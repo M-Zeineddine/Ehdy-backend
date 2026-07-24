@@ -15,10 +15,13 @@ function renderPageScripts(lottieUrl) {
       btn.addEventListener('click', function() {
         if (btn.classList.contains('opening')) return;
         btn.classList.add('opening');
+        // Matches the ribbon transition duration in styles.js (0.85s) so the
+        // reveal content only appears once the unwrap animation has actually
+        // finished, instead of cutting it off mid-motion.
         setTimeout(function() {
           document.body.classList.add('opened');
           document.dispatchEvent(new Event('gift:opened'));
-        }, 420);
+        }, 800);
       });
     })();
 

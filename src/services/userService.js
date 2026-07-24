@@ -58,15 +58,32 @@ async function updateUser(userId, updates) {
     throw new AppError('No valid fields to update', 400, 'NO_UPDATES');
   }
 
+  // Changing the phone number must force re-verification — a phone is also a
+  // login credential (see authService.signin), so silently carrying over the
+  // old number's verified flag would let someone claim login access to a
+  // number they never actually proved they own.
+  if (updates.phone !== undefined) {
+    fields.push(`is_phone_verified = FALSE`, `phone_verified_at = NULL`);
+  }
+
   fields.push(`updated_at = NOW()`);
   values.push(userId);
 
-  const result = await query(
-    `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} AND deleted_at IS NULL
-     RETURNING id, email, phone, first_name, last_name, profile_picture_url,
-               country_code, currency_code, date_of_birth, language, is_email_verified, updated_at`,
-    values
-  );
+  let result;
+  try {
+    result = await query(
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} AND deleted_at IS NULL
+       RETURNING id, email, phone, first_name, last_name, profile_picture_url,
+                 country_code, currency_code, date_of_birth, language,
+                 is_email_verified, is_phone_verified, updated_at`,
+      values
+    );
+  } catch (err) {
+    if (err.code === '23505') {
+      throw new AppError('This phone number is already in use', 409, 'PHONE_EXISTS');
+    }
+    throw err;
+  }
 
   if (result.rows.length === 0) {
     throw new AppError('User not found', 404, 'USER_NOT_FOUND');

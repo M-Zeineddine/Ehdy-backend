@@ -266,7 +266,7 @@ function renderCta({ styleIndex }) {
   return `
     <!-- CTA -->
     <div style="--i:${styleIndex}">
-      <a href="ehdyapp://open-gift" class="cta-btn">Open in Ehdy App</a>
+      <a href="ehdyapp://open-gift" class="cta-btn">Gift Them Back 🎁</a>
 
       <p class="footer">Powered by Ehdy</p>
     </div>`;

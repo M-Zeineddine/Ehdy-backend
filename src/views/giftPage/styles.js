@@ -67,7 +67,7 @@ function pageStyles([c1, c2]) {
     .js body:not(.opened) .reveal-content { display: none; }
     .opened .reveal-content > * {
       animation: fadeUp 0.55s ease both;
-      animation-delay: calc(var(--i, 0) * 130ms);
+      animation-delay: calc(var(--i, 0) * 170ms);
     }
 
     @keyframes cardPop {
@@ -94,7 +94,7 @@ function pageStyles([c1, c2]) {
       position: absolute;
       background: rgba(255,255,255,0.3);
       box-shadow: 0 0 12px rgba(0,0,0,0.06);
-      transition: transform 0.5s ease, opacity 0.5s ease;
+      transition: transform 0.85s ease, opacity 0.85s ease;
     }
     .ribbon-v { top: 0; bottom: 0; left: 50%; width: 34px; transform: translateX(-50%); }
     .ribbon-h { left: 0; right: 0; top: 50%; height: 34px; transform: translateY(-50%); }
@@ -104,7 +104,7 @@ function pageStyles([c1, c2]) {
       transform: translate(-50%, -50%);
       font-size: 46px;
       filter: drop-shadow(0 4px 8px rgba(0,0,0,0.25));
-      transition: transform 0.5s ease, opacity 0.4s ease;
+      transition: transform 0.85s ease, opacity 0.7s ease;
     }
     @keyframes hintPulse {
       0%, 100% { transform: translateX(-50%) scale(1); }
